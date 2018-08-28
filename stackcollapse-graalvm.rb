@@ -9,11 +9,11 @@ data = JSON.load(input)
 
 def gather_samples(data, stack = [], samples = [])
   data.each do |method|
-    stack.push method["root_name"]
-    method["self_hit_times"].each do |time|
+    stack.push method.fetch("root_name")
+    method.fetch("self_hit_times").each do |time|
       samples << [stack.dup, time]
     end
-    gather_samples(method["children"], stack, samples)
+    gather_samples(method.fetch("children"), stack, samples)
     stack.pop
   end
   samples
@@ -21,17 +21,17 @@ end
 
 def dump(data, stack = [])
   data.each do |method|
-    stack.push method["root_name"]
-    puts "#{stack.join(';')} #{method["self_hit_count"]}"
-    dump(method["children"], stack)
+    stack.push method.fetch("root_name")
+    puts "#{stack.join(';')} #{method.fetch("self_hit_count")}"
+    dump(method.fetch("children"), stack)
     stack.pop
   end
 end
 
-tool = data["tool"]
+tool = data.fetch("tool")
 case tool
 when "cpusampler"
-  data = data["profile"].flat_map { |thread| thread["samples"] }
+  data = data.fetch("profile").flat_map { |thread| thread.fetch("samples") }
 
   timestamp_order = ARGV.delete '--timestamp-order'
   if timestamp_order
@@ -42,10 +42,10 @@ when "cpusampler"
     dump(data)
   end
 when "cputracer"
-  data = data["profile"]
+  data = data.fetch("profile")
 
   data.each do |method|
-    puts "#{method["root_name"]} #{method["count"]}"
+    puts "#{method.fetch("root_name")} #{method.fetch("count")}"
   end
 else
   abort "Unknown tool: #{tool}"
