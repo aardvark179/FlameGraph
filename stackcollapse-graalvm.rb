@@ -7,7 +7,7 @@ input.shift until input.first.start_with?('{"')
 input = input.join
 data = JSON.load(input)
 
-def gather_samples(data, stack = [], samples = [])
+def gather_samples(data, stack, samples = [])
   data.each do |method|
     stack.push method.fetch("root_name")
     method.fetch("self_hit_times").each do |time|
@@ -19,7 +19,7 @@ def gather_samples(data, stack = [], samples = [])
   samples
 end
 
-def dump(data, stack = [])
+def dump(data, stack)
   data.each do |method|
     stack.push method.fetch("root_name")
     puts "#{stack.join(';')} #{method.fetch("self_hit_count")}"
@@ -31,15 +31,24 @@ end
 tool = data.fetch("tool")
 case tool
 when "cpusampler"
-  data = data.fetch("profile").flat_map { |thread| thread.fetch("samples") }
-
   timestamp_order = ARGV.delete '--timestamp-order'
-  if timestamp_order
-    gather_samples(data).sort_by { |stack, time| time }.each do |stack, time|
-      puts "#{stack.join(';')} 1"
+
+  data = data.fetch("profile")
+  stack = []
+
+  data.each do |thread|
+    name = thread.fetch("thread")
+    samples = thread.fetch("samples")
+
+    stack.push name
+    if timestamp_order
+      gather_samples(samples, stack).sort_by { |stack, time| time }.each do |stack, time|
+        puts "#{stack.join(';')} 1"
+      end
+    else
+      dump(samples, stack)
     end
-  else
-    dump(data)
+    stack.pop
   end
 when "cputracer"
   data = data.fetch("profile")
