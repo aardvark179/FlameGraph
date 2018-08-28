@@ -2,10 +2,11 @@
 
 require 'json'
 
-input = ARGF.read.lines
-input.shift until input.first.start_with?('{"')
-input = input.join
-data = JSON.load(input)
+data = ARGF.read.lines.find { |line|
+  line.start_with?('{"') and line.include?('"tool":')
+}
+abort "Could not find JSON in input" unless data
+data = JSON.load(data)
 
 def method_name(json)
   name = json.fetch("root_name")
