@@ -2,6 +2,8 @@
 
 require 'json'
 
+timestamp_order = ARGV.delete '--timestamp-order'
+
 data = ARGF.read.lines.find { |line|
   line.start_with?('{"') and line.include?('"tool":')
 }
@@ -37,8 +39,6 @@ end
 tool = data.fetch("tool")
 case tool
 when "cpusampler"
-  timestamp_order = ARGV.delete '--timestamp-order'
-
   data = data.fetch("profile")
   stack = []
 
