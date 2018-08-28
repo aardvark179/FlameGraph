@@ -39,10 +39,10 @@ end
 tool = data.fetch("tool")
 case tool
 when "cpusampler"
-  data = data.fetch("profile")
+  profile = data.fetch("profile")
   stack = []
 
-  data.each do |thread|
+  profile.each do |thread|
     name = thread.fetch("thread")
     samples = thread.fetch("samples")
 
@@ -57,9 +57,9 @@ when "cpusampler"
     stack.pop
   end
 when "cputracer"
-  data = data.fetch("profile")
+  profile = data.fetch("profile")
 
-  data.each do |method|
+  profile.each do |method|
     puts "#{method_name(method)} #{method.fetch("count")}"
   end
 else
