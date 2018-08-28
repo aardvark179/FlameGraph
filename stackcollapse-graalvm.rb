@@ -7,9 +7,14 @@ input.shift until input.first.start_with?('{"')
 input = input.join
 data = JSON.load(input)
 
+def method_name(json)
+  name = json.fetch("root_name")
+  name.inspect[1...-1]
+end
+
 def gather_samples(data, stack, samples = [])
   data.each do |method|
-    stack.push method.fetch("root_name")
+    stack.push method_name(method)
     method.fetch("self_hit_times").each do |time|
       samples << [stack.dup, time]
     end
@@ -21,7 +26,7 @@ end
 
 def dump(data, stack)
   data.each do |method|
-    stack.push method.fetch("root_name")
+    stack.push method_name(method)
     puts "#{stack.join(';')} #{method.fetch("self_hit_count")}"
     dump(method.fetch("children"), stack)
     stack.pop
@@ -54,7 +59,7 @@ when "cputracer"
   data = data.fetch("profile")
 
   data.each do |method|
-    puts "#{method.fetch("root_name")} #{method.fetch("count")}"
+    puts "#{method_name(method)} #{method.fetch("count")}"
   end
 else
   abort "Unknown tool: #{tool}"
