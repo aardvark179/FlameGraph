@@ -2,7 +2,7 @@
 
 require 'json'
 
-timestamp_order = ARGV.delete '--timestamp-order'
+TIMESTAMP_ORDER = ARGV.delete '--timestamp-order'
 
 data = ARGF.read.lines.find { |line|
   line.start_with?('{"') and line.include?('"tool":')
@@ -40,6 +40,7 @@ tool = data.fetch("tool")
 case tool
 when "cpusampler"
   profile = data.fetch("profile")
+  abort "Need hit times (--cpusampler.GatherHitTimes)" if TIMESTAMP_ORDER && !data["gathered_hit_times"]
   stack = []
 
   profile.each do |thread|
@@ -47,7 +48,7 @@ when "cpusampler"
     samples = thread.fetch("samples")
 
     stack.push name
-    if timestamp_order
+    if TIMESTAMP_ORDER
       gather_samples(samples, stack).sort_by { |stack, time| time }.each do |stack, time|
         puts "#{stack.join(';')} 1"
       end
