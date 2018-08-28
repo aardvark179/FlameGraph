@@ -2,6 +2,7 @@
 
 require 'json'
 
+SOURCE_INFO = ARGV.delete '--source'
 TIMESTAMP_ORDER = ARGV.delete '--timestamp-order'
 
 data = ARGF.read.lines.find { |line|
@@ -10,9 +11,19 @@ data = ARGF.read.lines.find { |line|
 abort "Could not find JSON in input" unless data
 data = JSON.load(data)
 
-def method_name(json)
-  name = json.fetch("root_name")
-  name.inspect[1...-1]
+def method_name(method)
+  name = method.fetch("root_name")
+  name = name.inspect[1...-1]
+  if SOURCE_INFO
+    source_section = method.fetch("source_section")
+    source_name = source_section["source_name"]
+    start_line = source_section["start_line"]
+    end_line = source_section["end_line"]
+    formatted_line = start_line == end_line ? start_line : "#{start_line}-#{end_line}"
+    "#{name} #{source_name}:#{formatted_line}"
+  else
+    name
+  end
 end
 
 def gather_samples(data, stack, samples = [])
