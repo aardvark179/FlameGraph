@@ -20,10 +20,10 @@ def method_name(method)
     start_line = source_section["start_line"]
     end_line = source_section["end_line"]
     formatted_line = start_line == end_line ? start_line : "#{start_line}-#{end_line}"
-    "#{name} #{source_name}:#{formatted_line}"
-  else
-    name
+    name = "#{name} #{source_name}:#{formatted_line}"
   end
+  # Remove ';' as that character is reserved for collapsed stacks
+  name.gsub(';', '')
 end
 
 def gather_samples(data, stack, samples = [])
