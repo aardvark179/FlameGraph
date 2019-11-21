@@ -26,15 +26,29 @@ def method_name(method)
   name.gsub(';', '')
 end
 
-def gather_samples(data, stack, samples = [])
-  data.each do |method|
+def gather_samples(data)
+  stack = []
+  samples = []
+  processing_stack = []
+  current = 0
+  finish = data.size
+  begin
+    method = data[current]
+    current += 1
     stack.push method_name(method)
     method.fetch("self_hit_times").each do |time|
       samples << [stack.dup, time]
     end
-    gather_samples(method.fetch("children"), stack, samples)
+    processing_stack.push([data, current, finish])
+    data = data.fetch('children')
+    current = 0
+    fniish = data.size
+    while (current >= finish)
+      data, current, finish = processing_stack.pop
+      return samples unless data
+    end
     stack.pop
-  end
+  end while true
   samples
 end
 
