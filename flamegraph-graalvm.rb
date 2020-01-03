@@ -13,7 +13,7 @@ class SVGGenerator
     @svg << <<-EOF
 <?xml version="1.0"#{enc_attr} standalone="no"?>
 <!DOCTYPE svg PUBLIC "-//W3C//DTD SVG 1.1//EN" "http://www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd">
-<svg version="1.1" width="#{width}" height="#{height}" onload="init(evt)" viewBox="0 0 #{width} #{height}" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">
+<svg version="1.1" width="#{width}" onload="init(evt)" viewBox="0 0 #{width} #{height}" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">
 <!-- Flame graph stack visualization. See https://github.com/brendangregg/FlameGraph for latest version, and http://www.brendangregg.com/flamegraphs.html for examples. -->
 <!-- NOTES: #{@notestext} -->
 EOF
@@ -78,8 +78,11 @@ EOF
 EOF
   end
 
-  def output
+  def close
     @svg << '</svg>'
+  end
+
+  def output
     @svg
   end
 
@@ -93,7 +96,7 @@ end
 
 class FlameGraph
 
-  def initialize(tree, **attributes)
+  def initialize(tree, svg, **attributes)
     @tree = tree
     @fonttype = "Verdana"
     @imagewidth = 1200.0         # max width, pixels
@@ -129,7 +132,7 @@ class FlameGraph
     @by_compilation = attributes[:by_compilation]
 
     @nameattr = {}
-    @svg = SVGGenerator.new
+    @svg = svg
 
     # internals
     @ypad1 = @fontsize * 3       # pad top, include title
@@ -150,6 +153,7 @@ class FlameGraph
 
   attr_reader :by_language
   attr_reader :by_compilation
+  attr_reader :timemax
 
   def name_hash(name)
     # Generate a predictable hash for a function name, weighted towards early characters
@@ -268,7 +272,7 @@ class FlameGraph
 
     draw_tree(@tree, 0)
 
-    puts @svg.output
+    @svg.close
   end
 
   def generate_prelude
@@ -622,7 +626,7 @@ EOF
     attributes[:onmouseover] ||= 's(this)'
     attributes[:onmouseout] ||= 'c()'
     attributes[:onclick] ||= 'zoom(this)'
-    attributes[:title] ||= @svg.escape(tree_node.name)
+    attributes[:title] ||= @svg.escape(tree_node.info_text(self))
     @svg.group_start(**attributes)
 
     color = tree_node.color(self, @colors)
@@ -695,6 +699,14 @@ class TreeNode
       graph.color_for_name(name, default)
     end
   end
+
+  def info_text(graph)
+    duration_str = "#{duration}".gsub(/(^[-+]?\d+?(?=(?>(?:\d{3})+)(?!\d))|\G\d{3}(?=\d))/, '\1,')
+    total_str = "#{graph.timemax}".gsub(/(^[-+]?\d+?(?=(?>(?:\d{3})+)(?!\d))|\G\d{3}(?=\d))/, '\1,')
+    pcnt_str = sprintf("%.2f", 100.0 * duration / graph.timemax)
+    "#{name} (#{duration_str} / #{total_str} samples, #{pcnt_str}%)"
+  end
+
 end
 
 class DataParser
@@ -871,5 +883,7 @@ end
 # Get the stack data
 data_parser = DataParser.new(ARGF, ARGV.delete('--source'), ARGV.delete('--timestamp-order'))
 # Generate the canvas
-graph = FlameGraph.new(data_parser.tree, by_language: ARGV.delete('--by-language'), by_compilation: ARGV.delete('--by-compilation'))
+svg = SVGGenerator.new
+graph = FlameGraph.new(data_parser.tree, svg, by_language: ARGV.delete('--by-language'), by_compilation: ARGV.delete('--by-compilation'))
 graph.draw_canvas
+puts svg.output
