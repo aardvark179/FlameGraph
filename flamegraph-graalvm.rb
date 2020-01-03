@@ -28,7 +28,7 @@ EOF
   end
 
   def group_start(**attributes)
-    keys = [:class, :style, :onmouseover, :onmouseout, :onclick]
+    keys = [:class, :style, :onmouseover, :onmouseout, :onclick, :id]
     # For each key in atttributes generate a string "name=value"
     formatted_attrs = []
     keys.each do |key|
@@ -257,6 +257,7 @@ class FlameGraph
 
     @svg.include(generate_prelude)
 
+    @svg.group_start(**{:id => 'flamegraph'})
     @svg.filled_rectangle(0, 0, @imagewidth, @imageheight, 'url(#background)')
 
     @svg.ttf_string(@black, @fonttype, @fontsize + 5, 0.0, (@imagewidth / 2).to_i, @fontsize * 2, @titletext, "middle")
@@ -271,6 +272,8 @@ class FlameGraph
     @svg.ttf_string(@black, @fonttype, @fontsize, 0.0, @imagewidth - @xpad - 100, @imageheight - (@ypad2 / 2), " ", "", 'id="matched"')
 
     draw_tree(@tree, 0)
+
+    @svg.group_end(id: 'flamegraph')
 
     @svg.close
   end
@@ -294,6 +297,7 @@ class FlameGraph
 		searchbtn = document.getElementById("search");
 		matchedtxt = document.getElementById("matched");
 		svg = document.getElementsByTagName("svg")[0];
+        flamegraph = document.getElementById("flamegraph");
 		searching = 0;
 	}
 
@@ -430,7 +434,7 @@ class FlameGraph
 		var unzoombtn = document.getElementById("unzoom");
 		unzoombtn.style["opacity"] = "1.0";
 
-		var el = document.getElementsByTagName("g");
+		var el = flamegraph.getElementsByTagName("g");
 		for(var i=0;i<el.length;i++){
 			var e = el[i];
 			var a = find_child(e, "rect").attributes;
@@ -472,7 +476,7 @@ class FlameGraph
 		var unzoombtn = document.getElementById("unzoom");
 		unzoombtn.style["opacity"] = "0.0";
 
-		var el = document.getElementsByTagName("g");
+		var el = flamegraph.getElementsByTagName("g");
 		for(i=0;i<el.length;i++) {
 			el[i].style["display"] = "block";
 			el[i].style["opacity"] = "1";
@@ -483,7 +487,7 @@ class FlameGraph
 
 	// search
 	function reset_search() {
-		var el = document.getElementsByTagName("rect");
+		var el = flamegraph.getElementsByTagName("rect");
 		for (var i=0; i < el.length; i++) {
 			orig_load(el[i], "fill")
 		}
@@ -506,7 +510,7 @@ class FlameGraph
 	}
 	function search(term) {
 		var re = new RegExp(term);
-		var el = document.getElementsByTagName("g");
+		var el = flamegraph.getElementsByTagName("g");
 		var matches = new Object();
 		var maxwidth = 0;
 		for (var i = 0; i < el.length; i++) {
