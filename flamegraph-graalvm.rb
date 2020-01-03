@@ -13,7 +13,7 @@ class SVGGenerator
     @svg << <<-EOF
 <?xml version="1.0"#{enc_attr} standalone="no"?>
 <!DOCTYPE svg PUBLIC "-//W3C//DTD SVG 1.1//EN" "http://www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd">
-<svg version="1.1" width="#{width}" onload="init(evt)" viewBox="0 0 #{width} #{height}" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">
+<svg version="1.1" width="#{width}" height="#{height}" onload="init(evt)" viewBox="0 0 #{width} #{height}" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink">
 <!-- Flame graph stack visualization. See https://github.com/brendangregg/FlameGraph for latest version, and http://www.brendangregg.com/flamegraphs.html for examples. -->
 <!-- NOTES: #{@notestext} -->
 EOF
@@ -149,11 +149,24 @@ class FlameGraph
 	@dgrey = @svg.color_allocate(200, 200, 200)
 
     @random = Random.new
+
+    @timemax ||= @tree.duration
+
+    @widthpertime = (@imagewidth - 2 * @xpad) / @timemax
+    minwidth_time = @minwidth / @widthpertime
+
+    @depthmax = @tree.depth(minwidth_time)
+
+    @imageheight = ((@depthmax + 1) * @frameheight) + @ypad1 + @ypad2
+    @imageheight += @ypad3 unless @subtitletext.empty?
+
   end
 
   attr_reader :by_language
   attr_reader :by_compilation
   attr_reader :timemax
+  attr_reader :imagewidth
+  attr_reader :imageheight
 
   def name_hash(name)
     # Generate a predictable hash for a function name, weighted towards early characters
@@ -243,15 +256,6 @@ class FlameGraph
     if @timemax && @timemax < @tree.duration
       # produce an error svg
     end
-    @timemax ||= @tree.duration
-
-    @widthpertime = (@imagewidth - 2 * @xpad) / @timemax
-    minwidth_time = @minwidth / @widthpertime
-
-    @depthmax = @tree.depth(minwidth_time)
-
-    @imageheight = ((@depthmax + 1) * @frameheight) + @ypad1 + @ypad2
-    @imageheight += @ypad3 unless @subtitletext.empty?
 
     @svg.header(@imagewidth, @imageheight)
 
