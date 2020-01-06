@@ -94,79 +94,15 @@ EOF
 
 end
 
-class FlameGraph
+class GraphHelper
 
-  def initialize(tree, svg, **attributes)
-    @tree = tree
-    @fonttype = "Verdana"
-    @imagewidth = 1200.0         # max width, pixels
-    @frameheight = 16.0          # max height is dynamic
-    @fontsize = 12.0             # base text size
-    @fontwidth = 0.59            # avg width relative to fontsize
-    @minwidth = 0.01              # min function width, pixels
-    @nametype = "Function:"      # what are the names in the data?
-    @countname = "samples"       # what are the counts in the data?
-    @colors = "hot"              # color theme
-    @bgcolor1 = "#eeeeee"        # background color gradient start
-    @bgcolor2 = "#eeeeb0"        # background color gradient stop
-    @nameattrfile                # file holding function attributes
-    @timemax                     # (override the) sum of the counts
-    @factor = 1.0                # factor to scale counts by
-    @hash = nil                  # color by function name
-    @palette = nil               # if we use consistent palettes (default off
-    @palette_map = []            # palette map hash
-    @pal_file = "palette.map"    # palette map file name
-    @stackreverse = nil          # reverse stack order, switching merge end
-    @inverted = nil              # icicle graph
-    @flamechart = nil            # produce a flame chart (sort by time, do not merge stacks)
-    @negate = nil                # switch differential hues
-    @titletext = ""              # centered heading
-    @titledefault = "Flame Graph" 	# overwritten by --title
-    @titleinverted = "Icicle Graph" 	#   "    "
-    @searchcolor = "rgb(230,0,230)" 	# color for search highlighting
-    @notestext = "" 		# embedded notes in SVG
-    @subtitletext = "" 		# second level title (optional)
-    @help = nil
-
-    @by_language = attributes[:by_language]
-    @by_compilation = attributes[:by_compilation]
-
-    @nameattr = {}
+  def initialize(svg)
     @svg = svg
-
-    # internals
-    @ypad1 = @fontsize * 3       # pad top, include title
-    @ypad2 = @fontsize * 2 + 10  # pad bottom, include labels
-    @ypad3 = @fontsize * 2       # pad top, include subtitle (optional)
-    @xpad = 10.0                 # pad lefm and right
-    @framepad = 1.0		# vertical padding for frames
-    @depthmax = 0
-
-    @white = @svg.color_allocate(255, 255, 255)
-	@black = @svg.color_allocate(0, 0, 0)
-	@vvdgrey = @svg.color_allocate(40, 40, 40)
-	@vdgrey = @svg.color_allocate(160, 160, 160)
-	@dgrey = @svg.color_allocate(200, 200, 200)
+    @negate = nil
+    @palette_map = {}
 
     @random = Random.new
-
-    @timemax ||= @tree.duration
-
-    @widthpertime = (@imagewidth - 2 * @xpad) / @timemax
-    minwidth_time = @minwidth / @widthpertime
-
-    @depthmax = @tree.depth(minwidth_time)
-
-    @imageheight = ((@depthmax + 1) * @frameheight) + @ypad1 + @ypad2
-    @imageheight += @ypad3 unless @subtitletext.empty?
-
   end
-
-  attr_reader :by_language
-  attr_reader :by_compilation
-  attr_reader :timemax
-  attr_reader :imagewidth
-  attr_reader :imageheight
 
   def name_hash(name)
     # Generate a predictable hash for a function name, weighted towards early characters
@@ -248,6 +184,74 @@ class FlameGraph
     return @palette_map[func] ||= color(func, colors, @hash)
   end
 
+end
+
+class FlameGraph
+
+  def initialize(tree, svg, helper, **attributes)
+    @tree = tree
+    @fonttype = "Verdana"
+    @imagewidth = 1200.0         # max width, pixels
+    @frameheight = 16.0          # max height is dynamic
+    @fontsize = 12.0             # base text size
+    @fontwidth = 0.59            # avg width relative to fontsize
+    @minwidth = 0.01              # min function width, pixels
+    @nametype = "Function:"      # what are the names in the data?
+    @countname = "samples"       # what are the counts in the data?
+    @colors = "hot"              # color theme
+    @bgcolor1 = "#eeeeee"        # background color gradient start
+    @bgcolor2 = "#eeeeb0"        # background color gradient stop
+    @nameattrfile                # file holding function attributes
+    @timemax                     # (override the) sum of the counts
+    @factor = 1.0                # factor to scale counts by
+    @hash = nil                  # color by function name
+    @palette = nil               # if we use consistent palettes (default off
+    @pal_file = "palette.map"    # palette map file name
+    @stackreverse = nil          # reverse stack order, switching merge end
+    @inverted = nil              # icicle graph
+    @flamechart = nil            # produce a flame chart (sort by time, do not merge stacks)
+    @titletext = ""              # centered heading
+    @titledefault = "Flame Graph" 	# overwritten by --title
+    @titleinverted = "Icicle Graph" 	#   "    "
+    @searchcolor = "rgb(230,0,230)" 	# color for search highlighting
+    @notestext = "" 		# embedded notes in SVG
+    @subtitletext = "" 		# second level title (optional)
+    @help = nil
+
+    @by_language = attributes[:by_language]
+    @by_compilation = attributes[:by_compilation]
+
+    @nameattr = {}
+    @svg = svg
+    @helper = helper
+
+    # internals
+    @ypad1 = @fontsize * 3       # pad top, include title
+    @ypad2 = @fontsize * 2 + 10  # pad bottom, include labels
+    @ypad3 = @fontsize * 2       # pad top, include subtitle (optional)
+    @xpad = 10.0                 # pad lefm and right
+    @framepad = 1.0		# vertical padding for frames
+    @depthmax = 0
+
+    @timemax ||= @tree.duration
+
+    @widthpertime = (@imagewidth - 2 * @xpad) / @timemax
+    minwidth_time = @minwidth / @widthpertime
+
+    @depthmax = @tree.depth(minwidth_time)
+
+    @imageheight = ((@depthmax + 1) * @frameheight) + @ypad1 + @ypad2
+    @imageheight += @ypad3 unless @subtitletext.empty?
+
+  end
+
+  attr_reader :by_language
+  attr_reader :by_compilation
+  attr_reader :timemax
+  attr_reader :imagewidth
+  attr_reader :imageheight
+  attr_reader :helper
+
   def draw_canvas
     if @tree.duration == 0
       # produce an error svg
@@ -256,8 +260,6 @@ class FlameGraph
     if @timemax && @timemax < @tree.duration
       # produce an error svg
     end
-
-    @svg.header(@imagewidth, @imageheight)
 
     @svg.include(generate_prelude)
 
@@ -278,8 +280,6 @@ class FlameGraph
     draw_tree(@tree, 0)
 
     @svg.group_end(id: 'flamegraph')
-
-    @svg.close
   end
 
   def generate_prelude
@@ -292,6 +292,7 @@ class FlameGraph
 </defs>
 <style type="text/css">
 	.func_g:hover { stroke:black; stroke-width:0.5; cursor:pointer; }
+	.func_h:hover { stroke:black; stroke-width:0.5; cursor:pointer; }
 </style>
 <script type="text/ecmascript">
 <![CDATA[
@@ -637,7 +638,7 @@ EOF
     attributes[:title] ||= @svg.escape(tree_node.info_text(self))
     @svg.group_start(**attributes)
 
-    color = tree_node.color(self, @colors)
+    color = tree_node.color(helper, by_compilation, by_language, @colors)
     @svg.filled_rectangle(x1, y1, x2, y2, color, 'rx="2" ry="2"')
 
     text_length = (x2 - x1) / (@fontsize * @fontwidth)
@@ -661,11 +662,110 @@ EOF
   end
 end
 
+class Histogram
+  def initialize(tree, svg, helper, **attributes)
+    @durations = tree.sum_self_time
+    @svg = svg
+    @helper = helper
+
+    @minwidth = 0.01
+    @imagewidth = 1200.0
+    @frameheight = 16.0
+    @fonttype = "Verdana"
+    @fontsize = 12.0
+    @fontwidth = 0.59
+    @subtitletext = ''
+
+    @white = @svg.color_allocate(255, 255, 255)
+	@black = @svg.color_allocate(0, 0, 0)
+	@vvdgrey = @svg.color_allocate(40, 40, 40)
+	@vdgrey = @svg.color_allocate(160, 160, 160)
+	@dgrey = @svg.color_allocate(200, 200, 200)
+
+    # internals
+    @ypad1 = @fontsize * 3       # pad top, include title
+    @ypad2 = @fontsize * 2 + 10  # pad bottom, include labels
+    @ypad3 = @fontsize * 2       # pad top, include subtitle (optional)
+    @xpad = 10.0                 # pad lefm and right
+    @framepad = 1.0		# vertical padding for frames
+    @depthmax = 0
+
+    @timemax ||= @durations.values.max
+
+    @widthpertime = (@imagewidth - 2 * @xpad) / @timemax
+    minwidth_time = @minwidth / @widthpertime
+
+    @depthmax = @durations.reject { |k, v| v < minwidth_time }.size
+
+    @imageheight = ((@depthmax + 1) * @frameheight) + @ypad1 + @ypad2
+    @imageheight += @ypad3 unless @subtitletext.empty?
+
+    @by_language = attributes[:by_language]
+    @by_compilation = attributes[:by_compilation]
+
+  end
+
+  attr_reader :imagewidth
+  attr_reader :imageheight
+  attr_reader :helper
+  attr_reader :by_language
+  attr_reader :by_compilation
+
+  def draw_canvas(origin_x, origin_y)
+    @svg.group_start(**{:id => 'histogram'})
+    @svg.filled_rectangle(origin_x, origin_y, origin_x + @imagewidth, origin_y + @imageheight, 'url(#background)')
+    depth = 0
+    @durations.sort { |a, b| b[1] <=> a[1] }.each { |name, duration| draw_element(name, duration, depth, origin_x, origin_y); depth += 1 }
+    @svg.group_end(id: 'histogram')
+  end
+
+  def draw_element(name, duration, depth, origin_x, origin_y)
+    x1 = origin_x + @xpad
+    x2 = origin_x + @xpad + duration * @widthpertime
+    y1 = origin_y + @ypad1 + depth * @frameheight
+	y2 = origin_y + @ypad1 + (depth + 1) * @frameheight - @framepad
+
+    attributes = {}
+    attributes[:class] ||= 'func_h'
+    attributes[:onmouseover] ||= 's(this)'
+    attributes[:onmouseout] ||= 'c()'
+#    attributes[:onclick] ||= 'zoom(this)'
+    attributes[:title] ||= @svg.escape(info_text(name, duration))
+    @svg.group_start(**attributes)
+
+    color = helper.color_for_name(name, 'hot')
+    @svg.filled_rectangle(x1, y1, x2, y2, color, 'rx="2" ry="2"')
+
+    text_length = (x2 - x1) / (@fontsize * @fontwidth)
+
+    text = ''
+    if text_length >= name.size
+      text = name
+    elsif text_length >= 3
+      text = name[0..(text_length-2)] + '..'
+    end
+
+    text = @svg.escape(text)
+
+    @svg.ttf_string(@black, @fonttype, @fontsize, 0.0, x1 + 3, 3 + (y1 + y2) / 2, text, "")
+
+    @svg.group_end(**attributes)
+
+  end
+
+  def info_text(name, duration)
+    duration_str = "#{duration}".gsub(/(^[-+]?\d+?(?=(?>(?:\d{3})+)(?!\d))|\G\d{3}(?=\d))/, '\1,')
+    "#{name} (#{duration_str} samples)"
+  end
+
+end
+
 class TreeNode
-  def initialize(children, duration, offset, name, language=nil, scale=nil)
+  def initialize(children, duration, offset, self_time, name, language=nil, scale=nil)
     @children = children
     @duration = duration
     @offset = offset
+    @self_time = self_time
     @name = name
     @language = language
     @scale = scale
@@ -674,6 +774,7 @@ class TreeNode
   attr_reader :children
   attr_reader :duration
   attr_reader :offset
+  attr_reader :self_time
   attr_reader :name
   attr_reader :language
   attr_reader :scale
@@ -686,10 +787,10 @@ class TreeNode
     end
   end
 
-  def color(graph, default)
-    if graph.by_compilation && scale
-      graph.color_scale(scale, 1.0)
-    elsif graph.by_language
+  def color(helper, by_compilation, by_language, default)
+    if by_compilation && scale
+      helper.color_scale(scale, 1.0)
+    elsif by_language
       type = if @language
                case @language
                when 'ruby'
@@ -702,9 +803,9 @@ class TreeNode
              else
                default
              end
-      graph.color_for_name(name, type)
+      helper.color_for_name(name, type)
     else
-      graph.color_for_name(name, default)
+      helper.color_for_name(name, default)
     end
   end
 
@@ -713,6 +814,13 @@ class TreeNode
     total_str = "#{graph.timemax}".gsub(/(^[-+]?\d+?(?=(?>(?:\d{3})+)(?!\d))|\G\d{3}(?=\d))/, '\1,')
     pcnt_str = sprintf("%.2f", 100.0 * duration / graph.timemax)
     "#{name} (#{duration_str} / #{total_str} samples, #{pcnt_str}%)"
+  end
+
+  def sum_self_time(totals={})
+    totals[name] ||= 0
+    totals[name] += self_time
+    children.each { |c| c.sum_self_time(totals)}
+    totals
   end
 
 end
@@ -742,10 +850,10 @@ class DataParser
         name = thread.fetch("thread")
         samples = thread.fetch("samples")
         children, total_time = make_trees(samples, offset)
-        thread_trees << TreeNode.new(children, total_time, offset, name)
+        thread_trees << TreeNode.new(children, total_time, offset, 0, name)
         offset += total_time
       end
-      TreeNode.new(thread_trees, offset, 0, "all")
+      TreeNode.new(thread_trees, offset, 0, 0, "all")
     when "cputracer"
       profile = data.fetch("profile")
 
@@ -773,7 +881,7 @@ class DataParser
                 0
               end
       children, child_time = make_trees(method.fetch("children"), offset + self_time)
-      t = TreeNode.new(children, duration, offset, name, language, scale)
+      t = TreeNode.new(children, duration, offset, self_time, name, language, scale)
       total_time += duration
       offset += duration
       t
@@ -892,6 +1000,13 @@ end
 data_parser = DataParser.new(ARGF, ARGV.delete('--source'), ARGV.delete('--timestamp-order'))
 # Generate the canvas
 svg = SVGGenerator.new
-graph = FlameGraph.new(data_parser.tree, svg, by_language: ARGV.delete('--by-language'), by_compilation: ARGV.delete('--by-compilation'))
+helper = GraphHelper.new(svg)
+graph = FlameGraph.new(data_parser.tree, svg, helper, by_language: ARGV.delete('--by-language'), by_compilation: ARGV.delete('--by-compilation'))
+histogram = Histogram.new(data_parser.tree, svg, helper)
+svg.header(graph.imagewidth, graph.imageheight + histogram.imageheight)
+
 graph.draw_canvas
+histogram.draw_canvas(0, graph.imageheight)
+
+svg.close
 puts svg.output
