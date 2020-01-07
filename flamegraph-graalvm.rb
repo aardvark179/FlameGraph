@@ -96,7 +96,7 @@ end
 
 class GraphOwner
 
-  def initialize
+  def initialize(**attributes)
     @svg = SVGGenerator.new
     @negate = nil
     @palette_map = {}
@@ -112,6 +112,9 @@ class GraphOwner
 
     @bgcolor1 = "#eeeeee"        # background color gradient start
     @bgcolor2 = "#eeeeb0"        # background color gradient stop
+
+    @by_language = attributes[:by_language]
+    @by_compilation = attributes[:by_compilation]
   end
 
   attr_reader :svg
@@ -121,6 +124,9 @@ class GraphOwner
   attr_reader :vvdgrey
   attr_reader :vdgrey
   attr_reader :dgrey
+
+  attr_reader :by_language
+  attr_reader :by_compilation
 
   def register_component(component)
     @components << component
@@ -304,9 +310,6 @@ class FlameGraph
     @subtitletext = "" 		# second level title (optional)
     @help = nil
 
-    @by_language = attributes[:by_language]
-    @by_compilation = attributes[:by_compilation]
-
     @nameattr = {}
     @owner = owner
 
@@ -330,8 +333,6 @@ class FlameGraph
     @owner.register_component(self)
   end
 
-  attr_reader :by_language
-  attr_reader :by_compilation
   attr_reader :timemax
   attr_reader :imagewidth
   attr_reader :imageheight
@@ -713,7 +714,7 @@ EOF
     attributes[:title] ||= svg.escape(tree_node.info_text(self))
     svg.group_start(**attributes)
 
-    color = tree_node.color(owner, by_compilation, by_language, @colors)
+    color = tree_node.color(owner, @colors)
     svg.filled_rectangle(x1, y1, x2, y2, color, 'rx="2" ry="2"')
 
     text_length = (x2 - x1) / (@fontsize * @fontwidth)
@@ -758,18 +759,15 @@ class Histogram
     @framepad = 1.0		# vertical padding for frames
     @depthmax = 0
 
-    @timemax ||= @durations.values.max
+    @timemax ||= @durations.values.max.self_time
 
     @widthpertime = (@imagewidth - 2 * @xpad) / @timemax
     minwidth_time = @minwidth / @widthpertime
 
-    @depthmax = @durations.reject { |k, v| v < minwidth_time }.size
+    @depthmax = @durations.reject { |k, v| v.self_time < minwidth_time }.size
 
     @imageheight = ((@depthmax + 1) * @frameheight) + @ypad1 + @ypad2
     @imageheight += @ypad3 unless @subtitletext.empty?
-
-    @by_language = attributes[:by_language]
-    @by_compilation = attributes[:by_compilation]
 
     @owner.register_component(self)
   end
@@ -777,8 +775,6 @@ class Histogram
   attr_reader :imagewidth
   attr_reader :imageheight
   attr_reader :owner
-  attr_reader :by_language
-  attr_reader :by_compilation
 
   def css
     <<-EOF
@@ -795,13 +791,13 @@ EOF
     svg.filled_rectangle(origin_x, origin_y, origin_x + @imagewidth, origin_y + @imageheight, 'url(#background)')
     svg.ttf_string(owner.black, @fonttype, @fontsize + 5, 0.0, origin_x + (@imagewidth / 2).to_i, origin_y + @fontsize * 2, 'Histogram', "middle")
     depth = 0
-    @durations.sort { |a, b| b[1] <=> a[1] }.each { |name, duration| draw_element(svg, name, duration, depth, origin_x, origin_y); depth += 1 }
+    @durations.sort { |a, b| b[1] <=> a[1] }.each { |name, entry| draw_element(svg, name, entry, depth, origin_x, origin_y); depth += 1 }
     svg.group_end(id: 'histogram')
   end
 
-  def draw_element(svg, name, duration, depth, origin_x, origin_y)
+  def draw_element(svg, name, entry, depth, origin_x, origin_y)
     x1 = origin_x + @xpad
-    x2 = origin_x + @xpad + duration * @widthpertime
+    x2 = origin_x + @xpad + entry.self_time * @widthpertime
     y1 = origin_y + @ypad1 + depth * @frameheight
 	y2 = origin_y + @ypad1 + (depth + 1) * @frameheight - @framepad
 
@@ -810,10 +806,10 @@ EOF
     attributes[:onmouseover] ||= 's(this)'
     attributes[:onmouseout] ||= 'c()'
 #    attributes[:onclick] ||= 'zoom(this)'
-    attributes[:title] ||= svg.escape(info_text(name, duration))
+    attributes[:title] ||= svg.escape(info_text(name, entry))
     svg.group_start(**attributes)
 
-    color = owner.color_for_name(name, 'hot')
+    color = entry.color(owner, 'hot')
     svg.filled_rectangle(x1, y1, x2, y2, color, 'rx="2" ry="2"')
 
     text_length = (x2 - x1) / (@fontsize * @fontwidth)
@@ -833,22 +829,81 @@ EOF
 
   end
 
-  def info_text(name, duration)
-    duration_str = "#{duration}".gsub(/(^[-+]?\d+?(?=(?>(?:\d{3})+)(?!\d))|\G\d{3}(?=\d))/, '\1,')
+  def info_text(name, entry)
+    duration_str = "#{entry.self_time}".gsub(/(^[-+]?\d+?(?=(?>(?:\d{3})+)(?!\d))|\G\d{3}(?=\d))/, '\1,')
     "#{name} (#{duration_str} samples)"
   end
 
 end
 
+class HistogramEntry
+
+  def initialize(name, language)
+    @name = name
+    @language = language
+    @self_time = 0
+    @compiled_samples = 0
+  end
+
+  attr_reader :self_time
+  attr_reader :name
+  attr_reader :language
+  attr_reader :compiled_samples
+
+  def <=>(other)
+    self_time <=> other.self_time
+  end
+
+  def add(node)
+    @self_time += node.self_time
+    @compiled_samples += node.compiled_samples
+  end
+
+  def interpreted_samples
+    self_time - compiled_samples
+  end
+
+  def scale
+    if self_time != 0
+      (1.0 * (compiled_samples - interpreted_samples)) / self_time
+    else
+      0
+    end
+  end
+
+  def color(owner, default)
+    if owner.by_compilation && scale
+      owner.color_scale(scale, 1.0)
+    elsif owner.by_language
+      type = if @language
+               case @language
+               when 'ruby'
+                 'orange'
+               when 'llvm'
+                 'green'
+               else
+                 'blue'
+               end
+             else
+               default
+             end
+      owner.color_for_name(name, type)
+    else
+      owner.color_for_name(name, default)
+    end
+  end
+
+end
+
 class TreeNode
-  def initialize(children, duration, offset, self_time, name, language=nil, scale=nil)
+  def initialize(children, duration, offset, self_time, name, language=nil, compiled_samples=0)
     @children = children
     @duration = duration
     @offset = offset
     @self_time = self_time
     @name = name
     @language = language
-    @scale = scale
+    @compiled_samples = compiled_samples
   end
 
   attr_reader :children
@@ -857,7 +912,19 @@ class TreeNode
   attr_reader :self_time
   attr_reader :name
   attr_reader :language
-  attr_reader :scale
+  attr_reader :compiled_samples
+
+  def interpreted_samples
+    self_time - compiled_samples
+  end
+
+  def scale
+    if self_time != 0
+      (1.0 * (compiled_samples - interpreted_samples)) / self_time
+    else
+      0
+    end
+  end
 
   def depth(min_time=0)
     if duration < min_time
@@ -867,10 +934,10 @@ class TreeNode
     end
   end
 
-  def color(owner, by_compilation, by_language, default)
-    if by_compilation && scale
+  def color(owner, default)
+    if owner.by_compilation && scale
       owner.color_scale(scale, 1.0)
-    elsif by_language
+    elsif owner.by_language
       type = if @language
                case @language
                when 'ruby'
@@ -897,8 +964,7 @@ class TreeNode
   end
 
   def sum_self_time(totals={})
-    totals[name] ||= 0
-    totals[name] += self_time
+    (totals[name] ||= HistogramEntry.new(name, language)).add(self)
     children.each { |c| c.sum_self_time(totals)}
     totals
   end
@@ -954,14 +1020,8 @@ class DataParser
       source_section = method.fetch('source_section')
       language = source_section.fetch('language')
       compiled_samples = method.fetch("self_compiled_hit_count")
-      interpreted_samples = method.fetch("self_interpreted_hit_count")
-      scale = if self_time != 0
-                (1.0 * (compiled_samples - interpreted_samples)) / self_time
-              else
-                0
-              end
       children, child_time = make_trees(method.fetch("children"), offset + self_time)
-      t = TreeNode.new(children, duration, offset, self_time, name, language, scale)
+      t = TreeNode.new(children, duration, offset, self_time, name, language, compiled_samples)
       total_time += duration
       offset += duration
       t
@@ -1079,7 +1139,7 @@ end
 # Get the stack data
 data_parser = DataParser.new(ARGF, ARGV.delete('--source'), ARGV.delete('--timestamp-order'))
 # Generate the canvas
-owner = GraphOwner.new
-graph = FlameGraph.new(data_parser.tree, owner, by_language: ARGV.delete('--by-language'), by_compilation: ARGV.delete('--by-compilation'))
+owner = GraphOwner.new(by_language: ARGV.delete('--by-language'), by_compilation: ARGV.delete('--by-compilation'))
+graph = FlameGraph.new(data_parser.tree, owner)
 histogram = Histogram.new(data_parser.tree, owner)
 puts owner.draw_canvas
