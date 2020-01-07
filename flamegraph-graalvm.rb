@@ -94,14 +94,102 @@ EOF
 
 end
 
-class GraphHelper
+class GraphOwner
 
-  def initialize(svg)
-    @svg = svg
+  def initialize
+    @svg = SVGGenerator.new
     @negate = nil
     @palette_map = {}
+    @components = []
 
     @random = Random.new
+
+    @white = @svg.color_allocate(255, 255, 255)
+	@black = @svg.color_allocate(0, 0, 0)
+	@vvdgrey = @svg.color_allocate(40, 40, 40)
+	@vdgrey = @svg.color_allocate(160, 160, 160)
+	@dgrey = @svg.color_allocate(200, 200, 200)
+
+    @bgcolor1 = "#eeeeee"        # background color gradient start
+    @bgcolor2 = "#eeeeb0"        # background color gradient stop
+  end
+
+  attr_reader :svg
+
+  attr_reader :white
+  attr_reader :black
+  attr_reader :vvdgrey
+  attr_reader :vdgrey
+  attr_reader :dgrey
+
+  def register_component(component)
+    @components << component
+  end
+
+  def init_svg
+    width = @components.map { |x| x.imagewidth }.max
+    height = @components.map { |x| x.imageheight }.sum
+    svg.header(width, height)
+    init_css
+  end
+
+  def init_css
+    svg.include( <<-EOF
+<defs >
+	<linearGradient id="background" y1="0" y2="1" x1="0" x2="0" >
+		<stop stop-color="#{@bgcolor1}" offset="5%" />
+		<stop stop-color="#{@bgcolor2}" offset="95%" />
+	</linearGradient>
+</defs>
+EOF
+               )
+    svg.include( <<-EOF
+<style type="text/css">
+EOF
+               )
+    @components.each { |c| svg.include(c.css) }
+    svg.include( <<-EOF
+</style>
+EOF
+               )
+  end
+
+  def scripts
+    svg.include( <<-EOF
+<script type="text/ecmascript">
+<![CDATA[
+EOF
+               )
+    @components.each { |c| svg.include(c.scripts) }
+    svg.include( <<-EOF
+]]>
+</script>
+EOF
+               )
+  end
+  def init_function
+    svg.include( <<-EOF
+EOF
+               )
+  end
+
+  def search_functions
+    svg.include( <<-EOF
+EOF
+               )
+  end
+
+
+  def draw_canvas
+    init_svg
+    scripts
+    x = y = 0
+    @components.each do |c|
+      c.draw_canvas(@svg, x, y)
+      y = y + c.imageheight
+    end
+    @svg.close
+    @svg.output
   end
 
   def name_hash(name)
@@ -188,7 +276,7 @@ end
 
 class FlameGraph
 
-  def initialize(tree, svg, helper, **attributes)
+  def initialize(tree, owner, **attributes)
     @tree = tree
     @fonttype = "Verdana"
     @imagewidth = 1200.0         # max width, pixels
@@ -199,8 +287,6 @@ class FlameGraph
     @nametype = "Function:"      # what are the names in the data?
     @countname = "samples"       # what are the counts in the data?
     @colors = "hot"              # color theme
-    @bgcolor1 = "#eeeeee"        # background color gradient start
-    @bgcolor2 = "#eeeeb0"        # background color gradient stop
     @nameattrfile                # file holding function attributes
     @timemax                     # (override the) sum of the counts
     @factor = 1.0                # factor to scale counts by
@@ -210,7 +296,7 @@ class FlameGraph
     @stackreverse = nil          # reverse stack order, switching merge end
     @inverted = nil              # icicle graph
     @flamechart = nil            # produce a flame chart (sort by time, do not merge stacks)
-    @titletext = ""              # centered heading
+    @titletext = "Flamegraph"              # centered heading
     @titledefault = "Flame Graph" 	# overwritten by --title
     @titleinverted = "Icicle Graph" 	#   "    "
     @searchcolor = "rgb(230,0,230)" 	# color for search highlighting
@@ -222,8 +308,7 @@ class FlameGraph
     @by_compilation = attributes[:by_compilation]
 
     @nameattr = {}
-    @svg = svg
-    @helper = helper
+    @owner = owner
 
     # internals
     @ypad1 = @fontsize * 3       # pad top, include title
@@ -242,7 +327,7 @@ class FlameGraph
 
     @imageheight = ((@depthmax + 1) * @frameheight) + @ypad1 + @ypad2
     @imageheight += @ypad3 unless @subtitletext.empty?
-
+    @owner.register_component(self)
   end
 
   attr_reader :by_language
@@ -250,9 +335,9 @@ class FlameGraph
   attr_reader :timemax
   attr_reader :imagewidth
   attr_reader :imageheight
-  attr_reader :helper
+  attr_reader :owner
 
-  def draw_canvas
+  def draw_canvas(svg, origin_x, origin_y)
     if @tree.duration == 0
       # produce an error svg
     end
@@ -261,41 +346,33 @@ class FlameGraph
       # produce an error svg
     end
 
-    @svg.include(generate_prelude)
+    svg.group_start(**{:id => 'flamegraph'})
+    svg.filled_rectangle(origin_x, origin_y, origin_x + @imagewidth, origin_y + @imageheight, 'url(#background)')
 
-    @svg.group_start(**{:id => 'flamegraph'})
-    @svg.filled_rectangle(0, 0, @imagewidth, @imageheight, 'url(#background)')
-
-    @svg.ttf_string(@black, @fonttype, @fontsize + 5, 0.0, (@imagewidth / 2).to_i, @fontsize * 2, @titletext, "middle")
+    svg.ttf_string(owner.black, @fonttype, @fontsize + 5, 0.0, origin_x + (@imagewidth / 2).to_i, origin_y + @fontsize * 2, @titletext, "middle")
     if !@subtitletext.empty?
-        @svg.ttf_string(@vdgrey, @fonttype, @fontsize, 0.0, (@imagewidth / 2).to_i, @fontsize * 4, @subtitletext, "middle")
+        svg.ttf_string(owner.vdgrey, @fonttype, @fontsize, 0.0, origin_x + (@imagewidth / 2).to_i,origin_y +  @fontsize * 4, @subtitletext, "middle")
     end
-    @svg.ttf_string(@black, @fonttype, @fontsize, 0.0, @xpad, @imageheight - (@ypad2 / 2), " ", "", 'id="details"')
-    @svg.ttf_string(@black, @fonttype, @fontsize, 0.0, @xpad, @fontsize * 2,
+    svg.ttf_string(owner.black, @fonttype, @fontsize, 0.0, origin_x + @xpad, origin_y + @imageheight - (@ypad2 / 2), " ", "", 'id="details"')
+    svg.ttf_string(owner.black, @fonttype, @fontsize, 0.0, origin_x + @xpad, origin_y + @fontsize * 2,
                     "Reset Zoom", "", 'id="unzoom" onclick="unzoom()" style="opacity:0.0;cursor:pointer"')
-    @svg.ttf_string(@black, @fonttype, @fontsize, 0.0, @imagewidth - @xpad - 100,
-                    @fontsize * 2, "Search", "", 'id="search" onmouseover="searchover()" onmouseout="searchout()" onclick="search_prompt()" style="opacity:0.1;cursor:pointer"')
-    @svg.ttf_string(@black, @fonttype, @fontsize, 0.0, @imagewidth - @xpad - 100, @imageheight - (@ypad2 / 2), " ", "", 'id="matched"')
+    svg.ttf_string(owner.black, @fonttype, @fontsize, 0.0, origin_x + @imagewidth - @xpad - 100,
+                    origin_y + @fontsize * 2, "Search", "", 'id="search" onmouseover="searchover()" onmouseout="searchout()" onclick="search_prompt()" style="opacity:0.1;cursor:pointer"')
+    svg.ttf_string(owner.black, @fonttype, @fontsize, 0.0, origin_x + @imagewidth - @xpad - 100, origin_y + @imageheight - (@ypad2 / 2), " ", "", 'id="matched"')
 
-    draw_tree(@tree, 0)
+    draw_tree(svg, @tree, 0, origin_x, origin_y)
 
-    @svg.group_end(id: 'flamegraph')
+    svg.group_end(id: 'flamegraph')
   end
 
-  def generate_prelude
+  def css
     <<-EOF
-<defs >
-	<linearGradient id="background" y1="0" y2="1" x1="0" x2="0" >
-		<stop stop-color="#{@bgcolor1}" offset="5%" />
-		<stop stop-color="#{@bgcolor2}" offset="95%" />
-	</linearGradient>
-</defs>
-<style type="text/css">
 	.func_g:hover { stroke:black; stroke-width:0.5; cursor:pointer; }
-	.func_h:hover { stroke:black; stroke-width:0.5; cursor:pointer; }
-</style>
-<script type="text/ecmascript">
-<![CDATA[
+EOF
+  end
+
+  def scripts
+    <<-EOF
 	var details, searchbtn, matchedtxt, svg;
 	function init(evt) {
 		details = document.getElementById("details").firstChild;
@@ -610,24 +687,22 @@ class FlameGraph
 			searchbtn.style["opacity"] = "0.1";
 		}
 	}
-]]>
-</script>
 EOF
   end
 
-  def draw_tree(tree_node, depth)
+  def draw_tree(svg, tree_node, depth, origin_x, origin_y)
 
-    x1 = @xpad + tree_node.offset * @widthpertime
-    x2 = @xpad + (tree_node.offset + tree_node.duration) * @widthpertime
+    x1 = origin_x + @xpad + tree_node.offset * @widthpertime
+    x2 = origin_x + @xpad + (tree_node.offset + tree_node.duration) * @widthpertime
 
     return if (x2 - x1 < @minwidth)
 
     if @inverted
-	  y1 = @ypad1 + depth * @frameheight
-	  y2 = @ypad1 + (depth + 1) * @frameheight - @framepad
+	  y1 = origin_y + @ypad1 + depth * @frameheight
+	  y2 = origin_y + @ypad1 + (depth + 1) * @frameheight - @framepad
 	else
-	  y1 = @imageheight - @ypad2 - (depth + 1) * @frameheight + @framepad
-	  y2 = @imageheight - @ypad2 - depth * @frameheight
+	  y1 = origin_y + @imageheight - @ypad2 - (depth + 1) * @frameheight + @framepad
+	  y2 = origin_y + @imageheight - @ypad2 - depth * @frameheight
     end
 
     attributes = (@nameattr[tree_node.name] ||= {})
@@ -635,11 +710,11 @@ EOF
     attributes[:onmouseover] ||= 's(this)'
     attributes[:onmouseout] ||= 'c()'
     attributes[:onclick] ||= 'zoom(this)'
-    attributes[:title] ||= @svg.escape(tree_node.info_text(self))
-    @svg.group_start(**attributes)
+    attributes[:title] ||= svg.escape(tree_node.info_text(self))
+    svg.group_start(**attributes)
 
-    color = tree_node.color(helper, by_compilation, by_language, @colors)
-    @svg.filled_rectangle(x1, y1, x2, y2, color, 'rx="2" ry="2"')
+    color = tree_node.color(owner, by_compilation, by_language, @colors)
+    svg.filled_rectangle(x1, y1, x2, y2, color, 'rx="2" ry="2"')
 
     text_length = (x2 - x1) / (@fontsize * @fontwidth)
 
@@ -650,23 +725,22 @@ EOF
       text = tree_node.name[0..(text_length-2)] + '..'
     end
 
-    text = @svg.escape(text)
+    text = svg.escape(text)
 
-    @svg.ttf_string(@black, @fonttype, @fontsize, 0.0, x1 + 3, 3 + (y1 + y2) / 2, text, "")
+    svg.ttf_string(owner.black, @fonttype, @fontsize, 0.0, x1 + 3, 3 + (y1 + y2) / 2, text, "")
 
-    @svg.group_end(**attributes)
+    svg.group_end(**attributes)
 
     tree_node.children.each do |t|
-      draw_tree(t, depth + 1)
+      draw_tree(svg, t, depth + 1, origin_x, origin_y)
     end
   end
 end
 
 class Histogram
-  def initialize(tree, svg, helper, **attributes)
+  def initialize(tree, owner, **attributes)
     @durations = tree.sum_self_time
-    @svg = svg
-    @helper = helper
+    @owner = owner
 
     @minwidth = 0.01
     @imagewidth = 1200.0
@@ -675,12 +749,6 @@ class Histogram
     @fontsize = 12.0
     @fontwidth = 0.59
     @subtitletext = ''
-
-    @white = @svg.color_allocate(255, 255, 255)
-	@black = @svg.color_allocate(0, 0, 0)
-	@vvdgrey = @svg.color_allocate(40, 40, 40)
-	@vdgrey = @svg.color_allocate(160, 160, 160)
-	@dgrey = @svg.color_allocate(200, 200, 200)
 
     # internals
     @ypad1 = @fontsize * 3       # pad top, include title
@@ -703,23 +771,35 @@ class Histogram
     @by_language = attributes[:by_language]
     @by_compilation = attributes[:by_compilation]
 
+    @owner.register_component(self)
   end
 
   attr_reader :imagewidth
   attr_reader :imageheight
-  attr_reader :helper
+  attr_reader :owner
   attr_reader :by_language
   attr_reader :by_compilation
 
-  def draw_canvas(origin_x, origin_y)
-    @svg.group_start(**{:id => 'histogram'})
-    @svg.filled_rectangle(origin_x, origin_y, origin_x + @imagewidth, origin_y + @imageheight, 'url(#background)')
-    depth = 0
-    @durations.sort { |a, b| b[1] <=> a[1] }.each { |name, duration| draw_element(name, duration, depth, origin_x, origin_y); depth += 1 }
-    @svg.group_end(id: 'histogram')
+  def css
+    <<-EOF
+	.func_h:hover { stroke:black; stroke-width:0.5; cursor:pointer; }
+EOF
   end
 
-  def draw_element(name, duration, depth, origin_x, origin_y)
+  def scripts
+    ''
+  end
+
+  def draw_canvas(svg, origin_x, origin_y)
+    svg.group_start(**{:id => 'histogram'})
+    svg.filled_rectangle(origin_x, origin_y, origin_x + @imagewidth, origin_y + @imageheight, 'url(#background)')
+    svg.ttf_string(owner.black, @fonttype, @fontsize + 5, 0.0, origin_x + (@imagewidth / 2).to_i, origin_y + @fontsize * 2, 'Histogram', "middle")
+    depth = 0
+    @durations.sort { |a, b| b[1] <=> a[1] }.each { |name, duration| draw_element(svg, name, duration, depth, origin_x, origin_y); depth += 1 }
+    svg.group_end(id: 'histogram')
+  end
+
+  def draw_element(svg, name, duration, depth, origin_x, origin_y)
     x1 = origin_x + @xpad
     x2 = origin_x + @xpad + duration * @widthpertime
     y1 = origin_y + @ypad1 + depth * @frameheight
@@ -730,11 +810,11 @@ class Histogram
     attributes[:onmouseover] ||= 's(this)'
     attributes[:onmouseout] ||= 'c()'
 #    attributes[:onclick] ||= 'zoom(this)'
-    attributes[:title] ||= @svg.escape(info_text(name, duration))
-    @svg.group_start(**attributes)
+    attributes[:title] ||= svg.escape(info_text(name, duration))
+    svg.group_start(**attributes)
 
-    color = helper.color_for_name(name, 'hot')
-    @svg.filled_rectangle(x1, y1, x2, y2, color, 'rx="2" ry="2"')
+    color = owner.color_for_name(name, 'hot')
+    svg.filled_rectangle(x1, y1, x2, y2, color, 'rx="2" ry="2"')
 
     text_length = (x2 - x1) / (@fontsize * @fontwidth)
 
@@ -745,11 +825,11 @@ class Histogram
       text = name[0..(text_length-2)] + '..'
     end
 
-    text = @svg.escape(text)
+    text = svg.escape(text)
 
-    @svg.ttf_string(@black, @fonttype, @fontsize, 0.0, x1 + 3, 3 + (y1 + y2) / 2, text, "")
+    svg.ttf_string(owner.black, @fonttype, @fontsize, 0.0, x1 + 3, 3 + (y1 + y2) / 2, text, "")
 
-    @svg.group_end(**attributes)
+    svg.group_end(**attributes)
 
   end
 
@@ -787,9 +867,9 @@ class TreeNode
     end
   end
 
-  def color(helper, by_compilation, by_language, default)
+  def color(owner, by_compilation, by_language, default)
     if by_compilation && scale
-      helper.color_scale(scale, 1.0)
+      owner.color_scale(scale, 1.0)
     elsif by_language
       type = if @language
                case @language
@@ -803,9 +883,9 @@ class TreeNode
              else
                default
              end
-      helper.color_for_name(name, type)
+      owner.color_for_name(name, type)
     else
-      helper.color_for_name(name, default)
+      owner.color_for_name(name, default)
     end
   end
 
@@ -999,14 +1079,7 @@ end
 # Get the stack data
 data_parser = DataParser.new(ARGF, ARGV.delete('--source'), ARGV.delete('--timestamp-order'))
 # Generate the canvas
-svg = SVGGenerator.new
-helper = GraphHelper.new(svg)
-graph = FlameGraph.new(data_parser.tree, svg, helper, by_language: ARGV.delete('--by-language'), by_compilation: ARGV.delete('--by-compilation'))
-histogram = Histogram.new(data_parser.tree, svg, helper)
-svg.header(graph.imagewidth, graph.imageheight + histogram.imageheight)
-
-graph.draw_canvas
-histogram.draw_canvas(0, graph.imageheight)
-
-svg.close
-puts svg.output
+owner = GraphOwner.new
+graph = FlameGraph.new(data_parser.tree, owner, by_language: ARGV.delete('--by-language'), by_compilation: ARGV.delete('--by-compilation'))
+histogram = Histogram.new(data_parser.tree, owner)
+puts owner.draw_canvas
