@@ -112,6 +112,7 @@ class GraphOwner
 
     @bgcolor1 = "#eeeeee"        # background color gradient start
     @bgcolor2 = "#eeeeb0"        # background color gradient stop
+    @searchcolor = "rgb(230,0,230)" 	# color for search highlighting
 
     @by_language = attributes[:by_language]
     @by_compilation = attributes[:by_compilation]
@@ -124,6 +125,7 @@ class GraphOwner
   attr_reader :vvdgrey
   attr_reader :vdgrey
   attr_reader :dgrey
+  attr_reader :searchcolor
 
   attr_reader :by_language
   attr_reader :by_compilation
@@ -166,6 +168,8 @@ EOF
 <![CDATA[
 EOF
                )
+    init_function
+    search_function
     @components.each { |c| svg.include(c.scripts) }
     svg.include( <<-EOF
 ]]>
@@ -173,14 +177,67 @@ EOF
 EOF
                )
   end
+
   def init_function
     svg.include( <<-EOF
+    function init(evt) {
+EOF
+               )
+    @components.each { |c|
+      svg.include( <<-EOF
+				#{c.init_function}(evt);
+EOF
+                 ) if c.init_function }
+    svg.include( <<-EOF
+    }
 EOF
                )
   end
 
-  def search_functions
+  def search_function
     svg.include( <<-EOF
+    var searchbtn, matchedtxt;
+	// ctrl-F for search
+	window.addEventListener("keydown",function (e) {
+		if (e.keyCode === 114 || (e.ctrlKey && e.keyCode === 70)) {
+			e.preventDefault();
+			search_prompt();
+		}
+	})
+
+    function reset_search() {
+EOF
+               )
+    @components.each { |c|
+      svg.include( <<-EOF
+				#{c.reset_search_function}();
+EOF
+                 ) if c.reset_search_function }
+    svg.include( <<-EOF
+    }
+	function search_prompt() {
+		if (!searching) {
+			var term = prompt("Enter a search term (regexp " +
+			    "allowed, eg: ^ext4_)", "");
+			if (term != null) {
+EOF
+               )
+    @components.each { |c|
+      svg.include( <<-EOF
+				#{c.search_function}(term);
+EOF
+                 ) if c.search_function }
+    svg.include( <<-EOF
+			}
+		} else {
+			reset_search();
+			searching = 0;
+			searchbtn.style["opacity"] = "0.1";
+			searchbtn.firstChild.nodeValue = "Search"
+			matchedtxt.style["opacity"] = "0.0";
+			matchedtxt.firstChild.nodeValue = ""
+		}
+	}
 EOF
                )
   end
@@ -305,7 +362,6 @@ class FlameGraph
     @titletext = "Flamegraph"              # centered heading
     @titledefault = "Flame Graph" 	# overwritten by --title
     @titleinverted = "Icicle Graph" 	#   "    "
-    @searchcolor = "rgb(230,0,230)" 	# color for search highlighting
     @notestext = "" 		# embedded notes in SVG
     @subtitletext = "" 		# second level title (optional)
     @help = nil
@@ -348,7 +404,7 @@ class FlameGraph
     end
 
     svg.group_start(**{:id => 'flamegraph'})
-    svg.filled_rectangle(origin_x, origin_y, origin_x + @imagewidth, origin_y + @imageheight, 'url(#background)')
+    svg.filled_rectangle(origin_x, origin_y, origin_x + @imagewidth, origin_y + @imageheight, 'url(#background)', 'id="fg_canvas"')
 
     svg.ttf_string(owner.black, @fonttype, @fontsize + 5, 0.0, origin_x + (@imagewidth / 2).to_i, origin_y + @fontsize * 2, @titletext, "middle")
     if !@subtitletext.empty?
@@ -358,7 +414,7 @@ class FlameGraph
     svg.ttf_string(owner.black, @fonttype, @fontsize, 0.0, origin_x + @xpad, origin_y + @fontsize * 2,
                     "Reset Zoom", "", 'id="unzoom" onclick="unzoom()" style="opacity:0.0;cursor:pointer"')
     svg.ttf_string(owner.black, @fonttype, @fontsize, 0.0, origin_x + @imagewidth - @xpad - 100,
-                    origin_y + @fontsize * 2, "Search", "", 'id="search" onmouseover="searchover()" onmouseout="searchout()" onclick="search_prompt()" style="opacity:0.1;cursor:pointer"')
+                    origin_y + @fontsize * 2, "Search", "", 'id="search" onmouseover="fg_searchover()" onmouseout="fg_searchout()" onclick="search_prompt()" style="opacity:0.1;cursor:pointer"')
     svg.ttf_string(owner.black, @fonttype, @fontsize, 0.0, origin_x + @imagewidth - @xpad - 100, origin_y + @imageheight - (@ypad2 / 2), " ", "", 'id="matched"')
 
     draw_tree(svg, @tree, 0, origin_x, origin_y)
@@ -372,34 +428,39 @@ class FlameGraph
 EOF
   end
 
+  def search_function
+    'fg_search'
+  end
+
+  def reset_search_function
+    'fg_reset_search'
+  end
+
+  def init_function
+    'fg_init'
+  end
+
   def scripts
     <<-EOF
-	var details, searchbtn, matchedtxt, svg;
-	function init(evt) {
-		details = document.getElementById("details").firstChild;
+	var flamegraph, flamegraph_canvas, flamegraph_details;
+	function fg_init(evt) {
+		flamegraph_details = document.getElementById("details").firstChild;
 		searchbtn = document.getElementById("search");
 		matchedtxt = document.getElementById("matched");
 		svg = document.getElementsByTagName("svg")[0];
         flamegraph = document.getElementById("flamegraph");
+        flamegraph_canvas = document.getElementById('fg_canvas')
 		searching = 0;
 	}
 
 	// mouse-over for info
 	function s(node) {		// show
 		info = g_to_text(node);
-		details.nodeValue = "#{@nametype} " + info;
+		flamegraph_details.nodeValue = "#{@nametype} " + info;
 	}
 	function c() {			// clear
-		details.nodeValue = ' ';
+		flamegraph_details.nodeValue = ' ';
 	}
-
-	// ctrl-F for search
-	window.addEventListener("keydown",function (e) {
-		if (e.keyCode === 114 || (e.ctrlKey && e.keyCode === 70)) {
-			e.preventDefault();
-			search_prompt();
-		}
-	})
 
 	// functions
 	function find_child(parent, name, attr) {
@@ -495,7 +556,7 @@ EOF
 			}
 			if (e.attributes["width"] != undefined) {
 				orig_save(e, "width");
-				e.attributes["width"].value = parseInt(svg.width.baseVal.value) - (#{@xpad}*2);
+				e.attributes["width"].value = parseInt(flamegraph_canvas.width.baseVal.value) - (#{@xpad}*2);
 			}
 		}
 		if (e.childNodes == undefined) return;
@@ -509,7 +570,7 @@ EOF
 		var xmin = parseFloat(attr["x"].value);
 		var xmax = parseFloat(xmin + width);
 		var ymin = parseFloat(attr["y"].value);
-		var ratio = (svg.width.baseVal.value - 2*#{@xpad}) / width;
+		var ratio = (flamegraph_canvas.width.baseVal.value - 2*#{@xpad}) / width;
 
 		// XXX: Workaround for JavaScript float issues (fix me)
 		var fudge = 0.0001;
@@ -569,29 +630,7 @@ EOF
 	}
 
 	// search
-	function reset_search() {
-		var el = flamegraph.getElementsByTagName("rect");
-		for (var i=0; i < el.length; i++) {
-			orig_load(el[i], "fill")
-		}
-	}
-	function search_prompt() {
-		if (!searching) {
-			var term = prompt("Enter a search term (regexp " +
-			    "allowed, eg: ^ext4_)", "");
-			if (term != null) {
-				search(term)
-			}
-		} else {
-			reset_search();
-			searching = 0;
-			searchbtn.style["opacity"] = "0.1";
-			searchbtn.firstChild.nodeValue = "Search"
-			matchedtxt.style["opacity"] = "0.0";
-			matchedtxt.firstChild.nodeValue = ""
-		}
-	}
-	function search(term) {
+	function fg_search(term) {
 		var re = new RegExp(term);
 		var el = flamegraph.getElementsByTagName("g");
 		var matches = new Object();
@@ -622,7 +661,7 @@ EOF
 				var x = parseFloat(rect.attributes["x"].value);
 				orig_save(rect, "fill");
 				rect.attributes["fill"].value =
-				    "#{@searchcolor}";
+				    "#{owner.searchcolor}";
 
 				// remember matches
 				if (matches[x] == undefined) {
@@ -678,14 +717,20 @@ EOF
 			pct = pct.toFixed(1)
 		matchedtxt.firstChild.nodeValue = "Matched: " + pct + "%";
 	}
-	function searchover(e) {
+	function fg_searchover(e) {
 		searchbtn.style["opacity"] = "1.0";
 	}
-	function searchout(e) {
+	function fg_searchout(e) {
 		if (searching) {
 			searchbtn.style["opacity"] = "1.0";
 		} else {
 			searchbtn.style["opacity"] = "0.1";
+		}
+	}
+	function fg_reset_search() {
+		var el = flamegraph.getElementsByTagName("rect");
+		for (var i=0; i < el.length; i++) {
+			orig_load(el[i], "fill")
 		}
 	}
 EOF
@@ -782,8 +827,119 @@ class Histogram
 EOF
   end
 
+  def search_function
+    'h_search'
+  end
+
+  def reset_search_function
+    'h_reset_search'
+  end
+
+  def init_function
+    'h_init'
+  end
+
   def scripts
-    ''
+    <<-EOF
+    var histogram
+    function h_init(evt) {
+        histogram = document.getElementById("histogram")
+    }
+	// search
+	function h_search(term) {
+		var re = new RegExp(term);
+		var el = histogram.getElementsByTagName("g");
+		var matches = new Object();
+		var maxwidth = 0;
+		for (var i = 0; i < el.length; i++) {
+			var e = el[i];
+			if (e.attributes["class"].value != "func_h")
+				continue;
+			var func = g_to_func(e);
+			var rect = find_child(e, "rect");
+			if (rect == null) {
+				// the rect might be wrapped in an anchor
+				// if nameattr href is being used
+				if (rect = find_child(e, "a")) {
+				    rect = find_child(r, "rect");
+				}
+			}
+			if (func == null || rect == null)
+				continue;
+
+			// Save max width. Only works as we have a root frame
+			var w = parseFloat(rect.attributes["width"].value);
+			if (w > maxwidth)
+				maxwidth = w;
+
+			if (func.match(re)) {
+				// highlight
+				var x = parseFloat(rect.attributes["x"].value);
+				orig_save(rect, "fill");
+				rect.attributes["fill"].value =
+				    "#{owner.searchcolor}";
+
+				// remember matches
+				if (matches[x] == undefined) {
+					matches[x] = w;
+				} else {
+					if (w > matches[x]) {
+						// overwrite with parent
+						matches[x] = w;
+					}
+				}
+				searching = 1;
+			}
+		}
+		if (!searching)
+			return;
+
+		searchbtn.style["opacity"] = "1.0";
+		searchbtn.firstChild.nodeValue = "Reset Search"
+
+		// calculate percent matched, excluding vertical overlap
+		var count = 0;
+		var lastx = -1;
+		var lastw = 0;
+		var keys = Array();
+		for (k in matches) {
+			if (matches.hasOwnProperty(k))
+				keys.push(k);
+		}
+		// sort the matched frames by their x location
+		// ascending, then width descending
+		keys.sort(function(a, b){
+			return a - b;
+		});
+		// Step through frames saving only the biggest bottom-up frames
+		// thanks to the sort order. This relies on the tree property
+		// where children are always smaller than their parents.
+		var fudge = 0.0001;	// JavaScript floating point
+		for (var k in keys) {
+			var x = parseFloat(keys[k]);
+			var w = matches[keys[k]];
+			if (x >= lastx + lastw - fudge) {
+				count += w;
+				lastx = x;
+				lastw = w;
+			}
+		}
+		// display matched percent
+		matchedtxt.style["opacity"] = "1.0";
+		pct = 100 * count / maxwidth;
+		if (pct == 100)
+			pct = "100"
+		else
+			pct = pct.toFixed(1)
+		matchedtxt.firstChild.nodeValue = "Matched: " + pct + "%";
+	}
+	function h_reset_search() {
+		var el = histogram.getElementsByTagName("rect");
+		for (var i=0; i < el.length; i++) {
+			orig_load(el[i], "fill")
+		}
+	}
+EOF
   end
 
   def draw_canvas(svg, origin_x, origin_y)
