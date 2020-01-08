@@ -64,11 +64,12 @@ EOF
     @svg << "</g>\n"
   end
 
-  def filled_rectangle(x1, y1, x2, y2, fill, extra='')
+  def filled_rectangle(x1, y1, x2, y2, fill, extra='', **attributes)
     w = x2 - x1
     h = y2 - y1
+    attrs = attributes.map { |k,v| "#{k}=\"#{v}\""}.join(' ')
     @svg << <<-EOF
-<rect x="#{x1}" y="#{y1}" width="#{w}" height="#{h}" fill="#{fill}" #{extra} />\n
+<rect x="#{x1}" y="#{y1}" width="#{w}" height="#{h}" fill="#{fill}" #{extra} #{attrs}/>\n
 EOF
   end
 
@@ -426,6 +427,7 @@ class FlameGraph
     <<-EOF
 	.func_g:hover { stroke:black; stroke-width:0.5; cursor:pointer; }
 EOF
+    ''
   end
 
   def search_function
@@ -455,11 +457,17 @@ EOF
 
 	// mouse-over for info
 	function s(node) {		// show
-		info = g_to_text(node);
+		info = g_to_text(node.parentNode);
 		flamegraph_details.nodeValue = "#{@nametype} " + info;
+        node.parentNode.setAttribute("stroke", "black");
+        node.parentNode.setAttribute("stroke-width", "0.5");
+        node.parentNode.setAttribute("cursor", "pointer");
 	}
-	function c() {			// clear
+	function c(node) {			// clear
 		flamegraph_details.nodeValue = ' ';
+        node.parentNode.removeAttribute("stroke");
+        node.parentNode.removeAttribute("stroke-width");
+        node.parentNode.removeAttribute("cursor");
 	}
 
 	// functions
@@ -753,14 +761,12 @@ EOF
 
     attributes = (@nameattr[tree_node.name] ||= {})
     attributes[:class] ||= 'func_g'
-    attributes[:onmouseover] ||= 's(this)'
-    attributes[:onmouseout] ||= 'c()'
     attributes[:onclick] ||= 'zoom(this)'
     attributes[:title] ||= svg.escape(tree_node.info_text(self))
     svg.group_start(**attributes)
 
     color = tree_node.color(owner, @colors)
-    svg.filled_rectangle(x1, y1, x2, y2, color, 'rx="2" ry="2"')
+    svg.filled_rectangle(x1, y1, x2, y2, color, 'rx="2" ry="2"', onmouseover: 's(this)', onmouseout:  'c(this)')
 
     text_length = (x2 - x1) / (@fontsize * @fontwidth)
 
@@ -825,6 +831,7 @@ class Histogram
     <<-EOF
 	.func_h:hover { stroke:black; stroke-width:0.5; cursor:pointer; }
 EOF
+    ''
   end
 
   def search_function
@@ -959,14 +966,11 @@ EOF
 
     attributes = {}
     attributes[:class] ||= 'func_h'
-    attributes[:onmouseover] ||= 's(this)'
-    attributes[:onmouseout] ||= 'c()'
-#    attributes[:onclick] ||= 'zoom(this)'
     attributes[:title] ||= svg.escape(info_text(name, entry))
     svg.group_start(**attributes)
 
     color = entry.color(owner, 'hot')
-    svg.filled_rectangle(x1, y1, x2, y2, color, 'rx="2" ry="2"')
+    svg.filled_rectangle(x1, y1, x2, y2, color, 'rx="2" ry="2"', onmouseover: 's(this)', onmouseout:  'c(this)')
 
     text_length = (x2 - x1) / (@fontsize * @fontwidth)
 
