@@ -173,18 +173,18 @@ EOF
 	// highlighting and info text
 
 	function s(node) {		// show
-		info = title(node.parentNode);
+		info = title(node);
 		flamegraph_details.nodeValue = "#{@nametype} " + info;
-        node.parentNode.setAttribute("stroke", "black");
-        node.parentNode.setAttribute("stroke-width", "0.5");
-        node.parentNode.setAttribute("cursor", "pointer");
+        node.setAttribute("stroke", "black");
+        node.setAttribute("stroke-width", "0.5");
+        node.setAttribute("cursor", "pointer");
 	}
 
 	function c(node) {			// clear
 		flamegraph_details.nodeValue = ' ';
-        node.parentNode.removeAttribute("stroke");
-        node.parentNode.removeAttribute("stroke-width");
-        node.parentNode.removeAttribute("cursor");
+        node.removeAttribute("stroke");
+        node.removeAttribute("stroke-width");
+        node.removeAttribute("cursor");
 	}
 
 	// Utility function
@@ -213,15 +213,15 @@ EOF
 		return child(e, "title").firstChild.nodeValue;
 	}
 
-	function function_name(e) {
-		return title(e);
-	}
+    function function_name(e) {
+        return title(e).replace(/\\([^(]*\\)$/,"");
+    }
 
 	function update_text(e) {
 		var r = child(e, "rect");
 		var t = child(e, "text");
 		var w = parseFloat(r.attributes["width"].value) -3;
-		var txt = child(e, "title").textContent.replace(/\\([^(]*\\)$/,"");
+		var txt = function_name(e);
 		t.setAttribute("x", parseFloat(r.getAttribute("x")) +3);
 
 		// Smaller than this size won't fit anything
@@ -298,14 +298,7 @@ EOF
 			var term = prompt("Enter a search term (regexp " +
 			    "allowed, eg: ^ext4_)", "");
 			if (term != null) {
-EOF
-               )
-    @components.each { |c|
-      svg.include( <<-EOF
-				#{c.search_function}(term);
-EOF
-                 ) if c.search_function }
-    svg.include( <<-EOF
+                search(term);
 			}
 		} else {
 			reset_search();
@@ -316,6 +309,17 @@ EOF
 			matchedtxt.firstChild.nodeValue = ""
 		}
 	}
+
+    function search(term) {
+EOF
+               )
+    @components.each { |c|
+      svg.include( <<-EOF
+        #{c.search_function}(term);
+EOF
+                 ) if c.search_function }
+    svg.include( <<-EOF
+    }
 EOF
                )
   end
@@ -697,7 +701,7 @@ EOF
 			var e = el[i];
 			if (e.attributes["class"].value != "func_g")
 				continue;
-			var func = function_name(e);
+			var func = title(e);
 			var rect = child(e, "rect");
 			if (rect == null) {
 				// the rect might be wrapped in an anchor
@@ -813,12 +817,12 @@ EOF
     attributes[:class] ||= 'func_g'
     attributes[:onclick] ||= 'zoom(this)'
     attributes[:title] ||= svg.escape(tree_node.info_text(self))
-    svg.group_start(**attributes)
+    svg.group_start(**attributes, onmouseover: 's(this)', onmouseout: 'c(this)')
 
     color = tree_node.color(owner, false, false, @colors)
     bl_color = tree_node.color(owner, true, false, @colors)
     bc_color = tree_node.color(owner, false, true, @colors)
-    svg.filled_rectangle(x1, y1, x2, y2, color, 'rx="2" ry="2"', onmouseover: 's(this)', onmouseout: 'c(this)', fg_color: color, bl_color: bl_color, bc_color: bc_color)
+    svg.filled_rectangle(x1, y1, x2, y2, color, 'rx="2" ry="2"', fg_color: color, bl_color: bl_color, bc_color: bc_color)
 
     text_length = (x2 - x1) / (owner.fontsize * owner.fontwidth)
 
@@ -911,7 +915,7 @@ EOF
 			var e = el[i];
 			if (e.attributes["class"].value != "func_h")
 				continue;
-			var func = function_name(e);
+			var func = title(e);
 			var rect = child(e, "rect");
 			if (rect == null) {
 				// the rect might be wrapped in an anchor
@@ -989,12 +993,29 @@ EOF
 			pct = pct.toFixed(1)
 		matchedtxt.firstChild.nodeValue = "Matched: " + pct + "%";
 	}
+
+    var hilight_element = null;
+
 	function h_reset_search() {
+        hilight_element = null;
 		var el = histogram.getElementsByTagName("rect");
 		for (var i=0; i < el.length; i++) {
 			restore_attr(el[i], "fill")
 		}
 	}
+
+
+    function h_highlight(e) {
+        if (hilight_element == e) {
+            hilight_element = null;
+            reset_search();
+        } else {
+            name = function_name(e);
+            reset_search();
+            hilight_element = e;
+            search(name);
+        }
+    }
 EOF
   end
 
@@ -1016,12 +1037,13 @@ EOF
     attributes = {}
     attributes[:class] ||= 'func_h'
     attributes[:title] ||= svg.escape(info_text(name, entry))
-    svg.group_start(**attributes)
+    attributes[:onclick] ||= "h_highlight(this)"
+    svg.group_start(**attributes, onmouseover: 's(this)', onmouseout:  'c(this)')
 
     color = entry.color(owner, false, false, 'hot')
     bl_color = entry.color(owner, true, false, 'hot')
     bc_color = entry.color(owner, false, true, 'hot')
-    svg.filled_rectangle(x1, y1, x2, y2, color, 'rx="2" ry="2"', onmouseover: 's(this)', onmouseout:  'c(this)', fg_color: color, bl_color: bl_color, bc_color: bc_color)
+    svg.filled_rectangle(x1, y1, x2, y2, color, 'rx="2" ry="2"', fg_color: color, bl_color: bl_color, bc_color: bc_color)
 
     text_length = (x2 - x1) / (owner.fontsize * owner.fontwidth)
 
