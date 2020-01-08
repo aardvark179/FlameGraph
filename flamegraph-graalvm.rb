@@ -102,6 +102,11 @@ class GraphOwner
     @negate = nil
     @palette_map = {}
     @components = []
+    @nametype = "Function:"      # what are the names in the data?
+
+    @fonttype = "Verdana"
+    @fontsize = 12.0             # base text size
+    @fontwidth = 0.59            # avg width relative to fontsize
 
     @random = Random.new
 
@@ -114,9 +119,6 @@ class GraphOwner
     @bgcolor1 = "#eeeeee"        # background color gradient start
     @bgcolor2 = "#eeeeb0"        # background color gradient stop
     @searchcolor = "rgb(230,0,230)" 	# color for search highlighting
-
-    @by_language = attributes[:by_language]
-    @by_compilation = attributes[:by_compilation]
   end
 
   attr_reader :svg
@@ -128,8 +130,9 @@ class GraphOwner
   attr_reader :dgrey
   attr_reader :searchcolor
 
-  attr_reader :by_language
-  attr_reader :by_compilation
+  attr_reader :fonttype
+  attr_reader :fontsize
+  attr_reader :fontwidth
 
   def register_component(component)
     @components << component
@@ -167,10 +170,84 @@ EOF
     svg.include( <<-EOF
 <script type="text/ecmascript">
 <![CDATA[
+	// highlighting and info text
+
+	function s(node) {		// show
+		info = title(node.parentNode);
+		flamegraph_details.nodeValue = "#{@nametype} " + info;
+        node.parentNode.setAttribute("stroke", "black");
+        node.parentNode.setAttribute("stroke-width", "0.5");
+        node.parentNode.setAttribute("cursor", "pointer");
+	}
+
+	function c(node) {			// clear
+		flamegraph_details.nodeValue = ' ';
+        node.parentNode.removeAttribute("stroke");
+        node.parentNode.removeAttribute("stroke-width");
+        node.parentNode.removeAttribute("cursor");
+	}
+
+	// Utility function
+
+	function child(parent, name) {
+		for (let i=0; i<parent.children.length;i++) {
+			if (parent.children[i].tagName == name)
+				return parent.children[i];
+		}
+		return;
+	}
+
+	function save_attr(e, attr, val) {
+		if (e.hasAttribute("_orig_"+attr)) return;
+		if (!e.hasAttribute(attr)) return;
+		e.setAttribute("_orig_"+attr, val != undefined ? val : e.getAttribute(attr));
+	}
+
+	function restore_attr(e, attr) {
+		if (!e.hasAttribute("_orig_"+attr)) return;
+		e.setAttribute(attr, e.getAttribute("_orig_"+attr));
+		e.removeAttribute("_orig_"+attr);
+	}
+
+	function title(e) {
+		return child(e, "title").firstChild.nodeValue;
+	}
+
+	function function_name(e) {
+		return title(e);
+	}
+
+	function update_text(e) {
+		var r = child(e, "rect");
+		var t = child(e, "text");
+		var w = parseFloat(r.attributes["width"].value) -3;
+		var txt = child(e, "title").textContent.replace(/\\([^(]*\\)$/,"");
+		t.setAttribute("x", parseFloat(r.getAttribute("x")) +3);
+
+		// Smaller than this size won't fit anything
+		if (w < 2*#{@fontsize}*#{@fontwidth}) {
+			t.textContent = "";
+			return;
+		}
+
+		t.textContent = txt;
+		// Fit in full text width
+		if (/^ *$/.test(txt) || t.getSubStringLength(0, txt.length) < w)
+			return;
+
+		for (var x=txt.length-2; x>0; x--) {
+			if (t.getSubStringLength(0, x+2) <= w) {
+				t.textContent = txt.substring(0,x) + "..";
+				return;
+			}
+		}
+		t.textContent = "";
+	}
 EOF
                )
     init_function
     search_function
+    color_change_functions
     @components.each { |c| svg.include(c.scripts) }
     svg.include( <<-EOF
 ]]>
@@ -243,6 +320,52 @@ EOF
                )
   end
 
+  def color_change_functions
+    svg.include( <<-EOF
+    // Cycle through grpah coloring.
+
+    var color_type = "fg";
+
+    function color_cycle() {
+        if (color_type == "fg") {
+            color_type = "bl";
+        } else if (color_type == "bl") {
+            color_type = "bc";
+        } else {
+            color_type = "fg";
+        }
+        update_color(color_type);
+    }
+
+    function update_color(color_type) {
+		var el = document.getElementsByTagName("rect");
+		for (var i=0; i < el.length; i++) {
+            set_element_color(el[i], color_type);
+		}
+    }
+
+    function set_element_color(e, color_type) {
+        if (!e.hasAttribute(color_type + "_color")) return;
+        if (e.hasAttribute("_orig_fill")) {
+            attr = "_orig_fill";
+        } else {
+            attr = "fill";
+        }
+        e.setAttribute(attr, e.getAttribute(color_type + "_color"));
+    }
+
+	// ctrl-F for search
+	window.addEventListener("keydown",function (e) {
+		if (e.key == "c") {
+			e.preventDefault();
+			color_cycle();
+		}
+	})
+
+
+EOF
+               )
+  end
 
   def draw_canvas
     init_svg
@@ -289,7 +412,7 @@ EOF
       return @svg.color_allocate(r, g, b)
 	when 'red'
 	  r = 200 + (55 * v1).to_i
-	  (80 * v1)
+	  x = (80 * v1)
 	  return @svg.color_allocate(r, x, x)
 	when 'green'
 	  g = 200 + (55 * v1).to_i
@@ -316,6 +439,9 @@ EOF
 	  r = 190 + (65 * v1).to_i
 	  g = 90 + (65 * v1).to_i
 	  return @svg.color_allocate(r, g, 0)
+	when 'grey'
+	  x = 175 + (55 * v1).to_i
+	  return @svg.color_allocate(x, x, x)
     end
 
 	return @svg.color_allocate(0, 0, 0)
@@ -342,13 +468,9 @@ class FlameGraph
 
   def initialize(tree, owner, **attributes)
     @tree = tree
-    @fonttype = "Verdana"
     @imagewidth = 1200.0         # max width, pixels
     @frameheight = 16.0          # max height is dynamic
-    @fontsize = 12.0             # base text size
-    @fontwidth = 0.59            # avg width relative to fontsize
     @minwidth = 0.01              # min function width, pixels
-    @nametype = "Function:"      # what are the names in the data?
     @countname = "samples"       # what are the counts in the data?
     @colors = "hot"              # color theme
     @nameattrfile                # file holding function attributes
@@ -371,9 +493,9 @@ class FlameGraph
     @owner = owner
 
     # internals
-    @ypad1 = @fontsize * 3       # pad top, include title
-    @ypad2 = @fontsize * 2 + 10  # pad bottom, include labels
-    @ypad3 = @fontsize * 2       # pad top, include subtitle (optional)
+    @ypad1 = owner.fontsize * 3       # pad top, include title
+    @ypad2 = owner.fontsize * 2 + 10  # pad bottom, include labels
+    @ypad3 = owner.fontsize * 2       # pad top, include subtitle (optional)
     @xpad = 10.0                 # pad lefm and right
     @framepad = 1.0		# vertical padding for frames
     @depthmax = 0
@@ -407,16 +529,16 @@ class FlameGraph
     svg.group_start(**{:id => 'flamegraph'})
     svg.filled_rectangle(origin_x, origin_y, origin_x + @imagewidth, origin_y + @imageheight, 'url(#background)', 'id="fg_canvas"')
 
-    svg.ttf_string(owner.black, @fonttype, @fontsize + 5, 0.0, origin_x + (@imagewidth / 2).to_i, origin_y + @fontsize * 2, @titletext, "middle")
+    svg.ttf_string(owner.black, owner.fonttype, owner.fontsize + 5, 0.0, origin_x + (@imagewidth / 2).to_i, origin_y + owner.fontsize * 2, @titletext, "middle")
     if !@subtitletext.empty?
-        svg.ttf_string(owner.vdgrey, @fonttype, @fontsize, 0.0, origin_x + (@imagewidth / 2).to_i,origin_y +  @fontsize * 4, @subtitletext, "middle")
+        svg.ttf_string(owner.vdgrey, owner.fonttype, owner.fontsize, 0.0, origin_x + (@imagewidth / 2).to_i,origin_y +  owner.fontsize * 4, @subtitletext, "middle")
     end
-    svg.ttf_string(owner.black, @fonttype, @fontsize, 0.0, origin_x + @xpad, origin_y + @imageheight - (@ypad2 / 2), " ", "", 'id="details"')
-    svg.ttf_string(owner.black, @fonttype, @fontsize, 0.0, origin_x + @xpad, origin_y + @fontsize * 2,
+    svg.ttf_string(owner.black, owner.fonttype, owner.fontsize, 0.0, origin_x + @xpad, origin_y + @imageheight - (@ypad2 / 2), " ", "", 'id="details"')
+    svg.ttf_string(owner.black, owner.fonttype, owner.fontsize, 0.0, origin_x + @xpad, origin_y + owner.fontsize * 2,
                     "Reset Zoom", "", 'id="unzoom" onclick="unzoom()" style="opacity:0.0;cursor:pointer"')
-    svg.ttf_string(owner.black, @fonttype, @fontsize, 0.0, origin_x + @imagewidth - @xpad - 100,
-                    origin_y + @fontsize * 2, "Search", "", 'id="search" onmouseover="fg_searchover()" onmouseout="fg_searchout()" onclick="search_prompt()" style="opacity:0.1;cursor:pointer"')
-    svg.ttf_string(owner.black, @fonttype, @fontsize, 0.0, origin_x + @imagewidth - @xpad - 100, origin_y + @imageheight - (@ypad2 / 2), " ", "", 'id="matched"')
+    svg.ttf_string(owner.black, owner.fonttype, owner.fontsize, 0.0, origin_x + @imagewidth - @xpad - 100,
+                    origin_y + owner.fontsize * 2, "Search", "", 'id="search" onmouseover="fg_searchover()" onmouseout="fg_searchout()" onclick="search_prompt()" style="opacity:0.1;cursor:pointer"')
+    svg.ttf_string(owner.black, owner.fonttype, owner.fontsize, 0.0, origin_x + @imagewidth - @xpad - 100, origin_y + @imageheight - (@ypad2 / 2), " ", "", 'id="matched"')
 
     draw_tree(svg, @tree, 0, origin_x, origin_y)
 
@@ -455,83 +577,11 @@ EOF
 		searching = 0;
 	}
 
-	// mouse-over for info
-	function s(node) {		// show
-		info = g_to_text(node.parentNode);
-		flamegraph_details.nodeValue = "#{@nametype} " + info;
-        node.parentNode.setAttribute("stroke", "black");
-        node.parentNode.setAttribute("stroke-width", "0.5");
-        node.parentNode.setAttribute("cursor", "pointer");
-	}
-	function c(node) {			// clear
-		flamegraph_details.nodeValue = ' ';
-        node.parentNode.removeAttribute("stroke");
-        node.parentNode.removeAttribute("stroke-width");
-        node.parentNode.removeAttribute("cursor");
-	}
-
-	// functions
-	function find_child(parent, name, attr) {
-		var children = parent.childNodes;
-		for (var i=0; i<children.length;i++) {
-			if (children[i].tagName == name)
-				return (attr != undefined) ? children[i].attributes[attr].value : children[i];
-		}
-		return;
-	}
-	function orig_save(e, attr, val) {
-		if (e.attributes["_orig_"+attr] != undefined) return;
-		if (e.attributes[attr] == undefined) return;
-		if (val == undefined) val = e.attributes[attr].value;
-		e.setAttribute("_orig_"+attr, val);
-	}
-	function orig_load(e, attr) {
-		if (e.attributes["_orig_"+attr] == undefined) return;
-		e.attributes[attr].value = e.attributes["_orig_"+attr].value;
-		e.removeAttribute("_orig_"+attr);
-	}
-	function g_to_text(e) {
-		var text = find_child(e, "title").firstChild.nodeValue;
-		return (text)
-	}
-	function g_to_func(e) {
-		var func = g_to_text(e);
-		// if there's any manipulation we want to do to the function
-		// name before it's searched, do it here before returning.
-		return (func);
-	}
-	function update_text(e) {
-		var r = find_child(e, "rect");
-		var t = find_child(e, "text");
-		var w = parseFloat(r.attributes["width"].value) -3;
-		var txt = find_child(e, "title").textContent.replace(/\\([^(]*\\)$/,"");
-		t.attributes["x"].value = parseFloat(r.attributes["x"].value) +3;
-
-		// Smaller than this size won't fit anything
-		if (w < 2*#{@fontsize}*#{@fontwidth}) {
-			t.textContent = "";
-			return;
-		}
-
-		t.textContent = txt;
-		// Fit in full text width
-		if (/^ *$/.test(txt) || t.getSubStringLength(0, txt.length) < w)
-			return;
-
-		for (var x=txt.length-2; x>0; x--) {
-			if (t.getSubStringLength(0, x+2) <= w) {
-				t.textContent = txt.substring(0,x) + "..";
-				return;
-			}
-		}
-		t.textContent = "";
-	}
-
 	// zoom
 	function zoom_reset(e) {
 		if (e.attributes != undefined) {
-			orig_load(e, "x");
-			orig_load(e, "width");
+			restore_attr(e, "x");
+			restore_attr(e, "width");
 		}
 		if (e.childNodes == undefined) return;
 		for(var i=0, c=e.childNodes; i<c.length; i++) {
@@ -541,12 +591,12 @@ EOF
 	function zoom_child(e, x, ratio) {
 		if (e.attributes != undefined) {
 			if (e.attributes["x"] != undefined) {
-				orig_save(e, "x");
+				save_attr(e, "x");
 				e.attributes["x"].value = (parseFloat(e.attributes["x"].value) - x - #{@xpad}) * ratio + #{@xpad};
-				if(e.tagName == "text") e.attributes["x"].value = find_child(e.parentNode, "rect", "x") + 3;
+				if(e.tagName == "text") e.attributes["x"].value = child(e.parentNode, "rect").getAttribute("x") + 3;
 			}
 			if (e.attributes["width"] != undefined) {
-				orig_save(e, "width");
+				save_attr(e, "width");
 				e.attributes["width"].value = parseFloat(e.attributes["width"].value) * ratio;
 			}
 		}
@@ -559,11 +609,11 @@ EOF
 	function zoom_parent(e) {
 		if (e.attributes) {
 			if (e.attributes["x"] != undefined) {
-				orig_save(e, "x");
+				save_attr(e, "x");
 				e.attributes["x"].value = #{@xpad};
 			}
 			if (e.attributes["width"] != undefined) {
-				orig_save(e, "width");
+				save_attr(e, "width");
 				e.attributes["width"].value = parseInt(flamegraph_canvas.width.baseVal.value) - (#{@xpad}*2);
 			}
 		}
@@ -573,7 +623,7 @@ EOF
 		}
 	}
 	function zoom(node) {
-		var attr = find_child(node, "rect").attributes;
+		var attr = child(node, "rect").attributes;
 		var width = parseFloat(attr["width"].value);
 		var xmin = parseFloat(attr["x"].value);
 		var xmax = parseFloat(xmin + width);
@@ -589,7 +639,7 @@ EOF
 		var el = flamegraph.getElementsByTagName("g");
 		for(var i=0;i<el.length;i++){
 			var e = el[i];
-			var a = find_child(e, "rect").attributes;
+			var a = child(e, "rect").attributes;
 			var ex = parseFloat(a["x"].value);
 			var ew = parseFloat(a["width"].value);
 			// Is it an ancestor
@@ -647,13 +697,13 @@ EOF
 			var e = el[i];
 			if (e.attributes["class"].value != "func_g")
 				continue;
-			var func = g_to_func(e);
-			var rect = find_child(e, "rect");
+			var func = function_name(e);
+			var rect = child(e, "rect");
 			if (rect == null) {
 				// the rect might be wrapped in an anchor
 				// if nameattr href is being used
-				if (rect = find_child(e, "a")) {
-				    rect = find_child(r, "rect");
+				if (rect = child(e, "a")) {
+				    rect = child(r, "rect");
 				}
 			}
 			if (func == null || rect == null)
@@ -667,7 +717,7 @@ EOF
 			if (func.match(re)) {
 				// highlight
 				var x = parseFloat(rect.attributes["x"].value);
-				orig_save(rect, "fill");
+				save_attr(rect, "fill");
 				rect.attributes["fill"].value =
 				    "#{owner.searchcolor}";
 
@@ -738,7 +788,7 @@ EOF
 	function fg_reset_search() {
 		var el = flamegraph.getElementsByTagName("rect");
 		for (var i=0; i < el.length; i++) {
-			orig_load(el[i], "fill")
+			restore_attr(el[i], "fill")
 		}
 	}
 EOF
@@ -765,10 +815,12 @@ EOF
     attributes[:title] ||= svg.escape(tree_node.info_text(self))
     svg.group_start(**attributes)
 
-    color = tree_node.color(owner, @colors)
-    svg.filled_rectangle(x1, y1, x2, y2, color, 'rx="2" ry="2"', onmouseover: 's(this)', onmouseout:  'c(this)')
+    color = tree_node.color(owner, false, false, @colors)
+    bl_color = tree_node.color(owner, true, false, @colors)
+    bc_color = tree_node.color(owner, false, true, @colors)
+    svg.filled_rectangle(x1, y1, x2, y2, color, 'rx="2" ry="2"', onmouseover: 's(this)', onmouseout: 'c(this)', fg_color: color, bl_color: bl_color, bc_color: bc_color)
 
-    text_length = (x2 - x1) / (@fontsize * @fontwidth)
+    text_length = (x2 - x1) / (owner.fontsize * owner.fontwidth)
 
     text = ''
     if text_length >= tree_node.name.size
@@ -779,7 +831,7 @@ EOF
 
     text = svg.escape(text)
 
-    svg.ttf_string(owner.black, @fonttype, @fontsize, 0.0, x1 + 3, 3 + (y1 + y2) / 2, text, "")
+    svg.ttf_string(owner.black, owner.fonttype, owner.fontsize, 0.0, x1 + 3, 3 + (y1 + y2) / 2, text, "")
 
     svg.group_end(**attributes)
 
@@ -797,15 +849,12 @@ class Histogram
     @minwidth = 0.01
     @imagewidth = 1200.0
     @frameheight = 16.0
-    @fonttype = "Verdana"
-    @fontsize = 12.0
-    @fontwidth = 0.59
     @subtitletext = ''
 
     # internals
-    @ypad1 = @fontsize * 3       # pad top, include title
-    @ypad2 = @fontsize * 2 + 10  # pad bottom, include labels
-    @ypad3 = @fontsize * 2       # pad top, include subtitle (optional)
+    @ypad1 = owner.fontsize * 3       # pad top, include title
+    @ypad2 = owner.fontsize * 2 + 10  # pad bottom, include labels
+    @ypad3 = owner.fontsize * 2       # pad top, include subtitle (optional)
     @xpad = 10.0                 # pad lefm and right
     @framepad = 1.0		# vertical padding for frames
     @depthmax = 0
@@ -862,13 +911,13 @@ EOF
 			var e = el[i];
 			if (e.attributes["class"].value != "func_h")
 				continue;
-			var func = g_to_func(e);
-			var rect = find_child(e, "rect");
+			var func = function_name(e);
+			var rect = child(e, "rect");
 			if (rect == null) {
 				// the rect might be wrapped in an anchor
 				// if nameattr href is being used
-				if (rect = find_child(e, "a")) {
-				    rect = find_child(r, "rect");
+				if (rect = child(e, "a")) {
+				    rect = child(r, "rect");
 				}
 			}
 			if (func == null || rect == null)
@@ -882,7 +931,7 @@ EOF
 			if (func.match(re)) {
 				// highlight
 				var x = parseFloat(rect.attributes["x"].value);
-				orig_save(rect, "fill");
+				save_attr(rect, "fill");
 				rect.attributes["fill"].value =
 				    "#{owner.searchcolor}";
 
@@ -943,7 +992,7 @@ EOF
 	function h_reset_search() {
 		var el = histogram.getElementsByTagName("rect");
 		for (var i=0; i < el.length; i++) {
-			orig_load(el[i], "fill")
+			restore_attr(el[i], "fill")
 		}
 	}
 EOF
@@ -952,7 +1001,7 @@ EOF
   def draw_canvas(svg, origin_x, origin_y)
     svg.group_start(**{:id => 'histogram'})
     svg.filled_rectangle(origin_x, origin_y, origin_x + @imagewidth, origin_y + @imageheight, 'url(#background)')
-    svg.ttf_string(owner.black, @fonttype, @fontsize + 5, 0.0, origin_x + (@imagewidth / 2).to_i, origin_y + @fontsize * 2, 'Histogram', "middle")
+    svg.ttf_string(owner.black, owner.fonttype, owner.fontsize + 5, 0.0, origin_x + (@imagewidth / 2).to_i, origin_y + owner.fontsize * 2, 'Histogram', "middle")
     depth = 0
     @durations.sort { |a, b| b[1] <=> a[1] }.each { |name, entry| draw_element(svg, name, entry, depth, origin_x, origin_y); depth += 1 }
     svg.group_end(id: 'histogram')
@@ -969,10 +1018,12 @@ EOF
     attributes[:title] ||= svg.escape(info_text(name, entry))
     svg.group_start(**attributes)
 
-    color = entry.color(owner, 'hot')
-    svg.filled_rectangle(x1, y1, x2, y2, color, 'rx="2" ry="2"', onmouseover: 's(this)', onmouseout:  'c(this)')
+    color = entry.color(owner, false, false, 'hot')
+    bl_color = entry.color(owner, true, false, 'hot')
+    bc_color = entry.color(owner, false, true, 'hot')
+    svg.filled_rectangle(x1, y1, x2, y2, color, 'rx="2" ry="2"', onmouseover: 's(this)', onmouseout:  'c(this)', fg_color: color, bl_color: bl_color, bc_color: bc_color)
 
-    text_length = (x2 - x1) / (@fontsize * @fontwidth)
+    text_length = (x2 - x1) / (owner.fontsize * owner.fontwidth)
 
     text = ''
     if text_length >= name.size
@@ -983,7 +1034,7 @@ EOF
 
     text = svg.escape(text)
 
-    svg.ttf_string(owner.black, @fonttype, @fontsize, 0.0, x1 + 3, 3 + (y1 + y2) / 2, text, "")
+    svg.ttf_string(owner.black, owner.fonttype, owner.fontsize, 0.0, x1 + 3, 3 + (y1 + y2) / 2, text, "")
 
     svg.group_end(**attributes)
 
@@ -1031,10 +1082,10 @@ class HistogramEntry
     end
   end
 
-  def color(owner, default)
-    if owner.by_compilation && scale
+  def color(owner, by_language, by_compilation, default)
+    if by_compilation && scale
       owner.color_scale(scale, 1.0)
-    elsif owner.by_language
+    elsif by_language
       type = if @language
                case @language
                when 'ruby'
@@ -1045,7 +1096,7 @@ class HistogramEntry
                  'blue'
                end
              else
-               default
+               'grey'
              end
       owner.color_for_name(name, type)
     else
@@ -1094,10 +1145,10 @@ class TreeNode
     end
   end
 
-  def color(owner, default)
-    if owner.by_compilation && scale
+  def color(owner, by_language, by_compilation, default)
+    if by_compilation && scale
       owner.color_scale(scale, 1.0)
-    elsif owner.by_language
+    elsif by_language
       type = if @language
                case @language
                when 'ruby'
@@ -1299,7 +1350,7 @@ end
 # Get the stack data
 data_parser = DataParser.new(ARGF, ARGV.delete('--source'), ARGV.delete('--timestamp-order'))
 # Generate the canvas
-owner = GraphOwner.new(by_language: ARGV.delete('--by-language'), by_compilation: ARGV.delete('--by-compilation'))
+owner = GraphOwner.new()
 graph = FlameGraph.new(data_parser.tree, owner)
 histogram = Histogram.new(data_parser.tree, owner)
 puts owner.draw_canvas
